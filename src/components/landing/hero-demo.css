@@ -1,0 +1,139 @@
+/*
+ * The hero demo plays once on page load: four lines are written, a
+ * highlighter swipes the first, the lasso loops around them, and the math
+ * check appears. Each piece's final state is its normal style, so with
+ * reduced motion (or if animations never run) the finished scene shows.
+ * Timings come from --delay and --dur set inline by hero-demo.tsx.
+ *
+ * Plain global CSS (prefixed hero-): next.config.ts routes every .css file
+ * through the Tailwind loader, which doesn't keep CSS-module class names.
+ */
+
+/* Only visible while animating. */
+.hero-lasso-draw,
+.hero-cursor {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hero-write {
+    animation: hero-write var(--dur, 480ms) linear var(--delay, 0ms) both;
+  }
+
+  .hero-swipe {
+    stroke-dasharray: 1 2;
+    animation: hero-swipe var(--dur, 300ms) ease-out var(--delay, 0ms) both;
+  }
+
+  .hero-lasso-draw {
+    stroke-dasharray: 1 2;
+    animation: hero-lasso-draw var(--dur, 900ms) cubic-bezier(0.45, 0, 0.55, 1) var(--delay, 0ms) both;
+  }
+
+  .hero-cursor {
+    offset-rotate: 0deg;
+    offset-anchor: 3px 2px;
+    animation:
+      hero-follow var(--dur, 900ms) cubic-bezier(0.45, 0, 0.55, 1) var(--delay, 0ms) both,
+      hero-cursor-fade calc(var(--dur, 900ms) + 300ms) linear var(--delay, 0ms) both;
+  }
+
+  .hero-appear {
+    animation: hero-appear 220ms ease-out var(--delay, 0ms) both;
+  }
+
+  .hero-pop {
+    transform-origin: 50% 100%;
+    animation: hero-pop 260ms cubic-bezier(0.2, 0.9, 0.3, 1.2) var(--delay, 0ms) both;
+  }
+
+  .hero-card {
+    animation: hero-card 420ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--delay, 0ms) both;
+  }
+}
+
+@keyframes hero-write {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes hero-swipe {
+  from {
+    stroke-dashoffset: 1.02;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes hero-lasso-draw {
+  0% {
+    stroke-dashoffset: 1.02;
+    opacity: 1;
+  }
+  97% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+
+@keyframes hero-follow {
+  from {
+    offset-distance: 0%;
+  }
+  to {
+    offset-distance: 100%;
+  }
+}
+
+@keyframes hero-cursor-fade {
+  0% {
+    opacity: 0;
+  }
+  4%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes hero-appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes hero-pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes hero-card {
+  from {
+    opacity: 0;
+    transform: translateX(-14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

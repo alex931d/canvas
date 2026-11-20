@@ -1,0 +1,696 @@
+// Unit checks for the pure parts of the new features: the chemistry
+// parser, molar masses and the balancer, the graph expression parser, the
+// collaboration document model (two simulated tabs and a fake server),
+// to-do board layout and card moves, byte ranges for video, the schemas,
+// the study buddies' levels, streaks and lines, and the seasonal themes' dates.
+//   npm run test:unit
+import { balanceEquation } from "../src/lib/chem/balance";
+import { ELEMENTS } from "../src/lib/chem/elements";
+import { molarMass, parseSpecies, speciesToMhchem, speciesToText } from "../src/lib/chem/formula";
+import { elementBox, scaleElement } from "../src/lib/canvas/geometry";
+import {
+  addColumn,
+  dropSlot,
+  findCard,
+  finishedCards,
+  kanbanLayout,
+  kanbanMinWidth,
+  kanbanPartAt,
+  moveCard,
+  newKanban,
+  progress,
+  removeColumn,
+  wrapText,
+} from "../src/lib/canvas/kanban";
+import { assetIdsOf, elementSchema, type CanvasElement, type KanbanElement } from "../src/lib/canvas/schema";
+import { parseRange } from "../src/lib/http/range";
+import { buildGrid, clearLine, edgeSpots, findPath, freeSpots, isFree, nearestFree, obstaclesOf, pathClear, touchesDrawing } from "../src/lib/buddy/pathing";
+import { afterReview, levelUp } from "../src/lib/buddy/lines";
+import { accessoriesFor, DEFAULT_SETTINGS, levelFor, settingsSchema, streakFrom, type Progress } from "../src/lib/buddy/shared";
+import { CollabDoc, type RemoteChange } from "../src/lib/collab/doc";
+import { applyOps, type DocOp } from "../src/lib/collab/ops";
+import { compileExpression, ExprError, formatTick, niceStep } from "../src/lib/math/expr";
+import { easterSunday, resolveTheme, themeForDate } from "../src/lib/seasons";
+import { adminHref, pageWindow, parseAdminQuery } from "../src/lib/admin/query";
+import { ElementEffects, inkLength, MAX_ANIMATED, staggerStep, traceDuration } from "../src/lib/canvas/effects";
+import { KanbanEffects } from "../src/lib/canvas/kanban-fx";
+import { DEFAULT_PREFERENCES, parsePreferences } from "../src/lib/preferences";
+import { act, BattleError, catchChance, makeFighter, ratesOf, startBattle, viewOf, type BattleState } from "../src/lib/buddy/battle";
+import { ABILITY_POOL, bambooFor, DEFAULT_KINDS, pickRarity, raritiesAt, rollWild, starterAbility } from "../src/lib/buddy/kinds";
+import { apartText, DEFAULT_RULES, firstLevel, openingsOf, rulesFrom, rulesFromForm, sharesAt } from "../src/lib/buddy/rules";
+import { avatarUrl, sniffImageType } from "../src/lib/profile/avatar";
+
+let fails = 0;
+const eq = (label: string, got: unknown, want: unknown) => {
+  const ok = JSON.stringify(got) === JSON.stringify(want);
+  if (!ok) fails++;
+  console.log(`${ok ? "ok  " : "FAIL"} ${label}${ok ? "" : `  got ${JSON.stringify(got)} want ${JSON.stringify(want)}`}`);
+};
+const near = (label: string, got: number, want: number, tol = 1e-3) => {
+  const ok = Math.abs(got - want) <= tol;
+  if (!ok) fails++;
+  console.log(`${ok ? "ok  " : "FAIL"} ${label}${ok ? "" : `  got ${got} want ${want}`}`);
+};
+
+eq("118 elements", ELEMENTS.length, 118);
+eq("unique symbols", new Set(ELEMENTS.map((e) => e.symbol)).size, 118);
+const mm = (f: string) => molarMass(parseSpecies(f).counts).total;
+near("H2O", mm("H2O"), 18.015);
+near("CO2", mm("CO2"), 44.009);
+near("NaCl", mm("NaCl"), 58.44, 0.01);
+near("C6H12O6", mm("C6H12O6"), 180.156);
+near("Ca(OH)2", mm("Ca(OH)2"), 74.092);
+near("CuSO4·5H2O", mm("CuSO4·5H2O"), 249.68, 0.01);
+near("CuSO4.5H2O", mm("CuSO4.5H2O"), 249.68, 0.01);
+near("K4[Fe(CN)6]", mm("K4[Fe(CN)6]"), 368.35, 0.01);
+near("(NH4)2SO4", mm("(NH4)2SO4"), 132.14, 0.01);
+near("Fe2(SO4)3", mm("Fe2(SO4)3"), 399.858);
+const s1 = parseSpecies("Fe3+"); eq("Fe3+ charge", [s1.body, s1.charge], ["Fe", 3]);
+const s2 = parseSpecies("NO3-"); eq("NO3- charge", [s2.body, s2.charge], ["NO3", -1]);
+const s3 = parseSpecies("SO42-"); eq("SO42-", [s3.body, s3.charge], ["SO4", -2]);
+const s4 = parseSpecies("SO4^2-"); eq("SO4^2-", [s4.body, s4.charge], ["SO4", -2]);
+const s5 = parseSpecies("Fe^{3+}"); eq("Fe^{3+}", [s5.body, s5.charge], ["Fe", 3]);
+const s6 = parseSpecies("Fe+3"); eq("Fe+3", [s6.body, s6.charge], ["Fe", 3]);
+const s7 = parseSpecies("2H2O(l)"); eq("2H2O(l)", [s7.coefficient, s7.body, s7.state], [2, "H2O", "l"]);
+const s8 = parseSpecies("SO₄²⁻"); eq("unicode SO4 2-", [s8.body, s8.charge], ["SO4", -2]);
+const s9 = parseSpecies("Hg22+"); eq("Hg22+", [s9.body, s9.charge], ["Hg2", 2]);
+const s10 = parseSpecies("e-"); eq("electron", [s10.isElectron, s10.charge], [true, -1]);
+const err = (f: string) => { try { parseSpecies(f); return "no error"; } catch (e) { return (e as Error).message; } };
+eq("lowercase hint", err("h2o"), 'Element symbols start with a capital letter: try "H".');
+eq("unknown", err("Xq2"), '"Xq" isn\'t an element symbol.');
+eq("unclosed", err("Ca(OH2"), 'A bracket is never closed: add ")".');
+eq("mhchem", speciesToMhchem(parseSpecies("SO42-")), "SO4^{2-}");
+eq("text", speciesToText(parseSpecies("SO42-")), "SO₄²⁻");
+eq("text hydrate", speciesToText(parseSpecies("CuSO4·5H2O")), "CuSO₄·5H₂O");
+
+const b = (e: string) => { const r = balanceEquation(e); return r.ok ? r.text : "ERR: " + r.error; };
+eq("rust", b("Fe + O2 -> Fe2O3"), "4Fe + 3O₂ → 2Fe₂O₃");
+eq("water", b("H2 + O2 -> H2O"), "2H₂ + O₂ → 2H₂O");
+eq("water no spaces", b("H2+O2->H2O"), "2H₂ + O₂ → 2H₂O");
+eq("combustion", b("C3H8 + O2 → CO2 + H2O"), "C₃H₈ + 5O₂ → 3CO₂ + 4H₂O");
+eq("existing coefficients ignored", b("2H2 + 2O2 = 2H2O"), "2H₂ + O₂ → 2H₂O");
+eq("haber", b("N2 + H2 <=> NH3"), "N₂ + 3H₂ ⇌ 2NH₃");
+eq("redox ionic", b("MnO4- + Fe2+ + H+ -> Mn2+ + Fe3+ + H2O"), "MnO₄⁻ + 5Fe²⁺ + 8H⁺ → Mn²⁺ + 5Fe³⁺ + 4H₂O");
+eq("half reaction", b("Fe3+ + e- -> Fe2+"), "Fe³⁺ + e⁻ → Fe²⁺");
+eq("states", b("Ag+(aq) + Cl-(aq) -> AgCl(s)"), "Ag⁺(aq) + Cl⁻(aq) → AgCl(s)");
+eq("dichromate", b("Cr2O72- + H+ + I- -> Cr3+ + I2 + H2O"), "Cr₂O₇²⁻ + 14H⁺ + 6I⁻ → 2Cr³⁺ + 3I₂ + 7H₂O");
+eq("glucose", b("C6H12O6 + O2 -> CO2 + H2O"), "C₆H₁₂O₆ + 6O₂ → 6CO₂ + 6H₂O");
+eq("KMnO4 HCl", b("KMnO4 + HCl -> KCl + MnCl2 + H2O + Cl2"), "2KMnO₄ + 16HCl → 2KCl + 2MnCl₂ + 8H₂O + 5Cl₂");
+eq("one side only", b("H2 + O2 -> NaCl"), "ERR: H appears only on the left, so this can't balance. Check the formulas.");
+eq("no arrow", b("H2 + O2"), "ERR: Put an arrow between reactants and products, like H2 + O2 -> H2O.");
+eq("ambiguous", b("H2 + O2 -> H2O + H2O2"), "ERR: There's more than one way to balance this. It may be two reactions in one: balance them separately.");
+const r = balanceEquation("Fe + O2 -> Fe2O3");
+eq("mhchem out", r.ok && r.mhchem, "4Fe + 3O2 -> 2Fe2O3");
+eq("rows", r.ok && r.rows, [{ symbol: "Fe", left: 4, right: 4 }, { symbol: "O", left: 6, right: 6 }]);
+
+const f = (src: string, x: number) => compileExpression(src)(x);
+near("x^2-3x+2 at 3", f("x^2 - 3x + 2", 3), 2);
+near("y= prefix", f("y = 2x + 1", 2), 5);
+near("sin x", f("sin x", Math.PI / 2), 1);
+near("2sin(3x)", f("2sin(3x)", Math.PI / 6), 2);
+near("sin^2 x + cos^2 x", f("sin^2 x + cos^2 x", 0.7), 1);
+near("sin^-1(x)", f("sin^-1(x)", 1), Math.PI / 2);
+near("|x - 1|", f("|x - 1|", -2), 3);
+near("2|x|", f("2|x|", -2), 4);
+near("e^(-x^2)", f("e^(-x^2)", 1), Math.exp(-1));
+near("-x^2", f("-x^2", 3), -9);
+near("2^-1", f("2^-1", 0), 0.5);
+near("x(x+1)", f("x(x+1)", 2), 6);
+near("(x+1)(x-1)", f("(x+1)(x-1)", 3), 8);
+near("ln x", f("ln x", Math.E), 1);
+near("log(2, x)", f("log(2, x)", 8), 3);
+near("log x", f("log x", 1000), 3);
+near("sqrt x + 1", f("sqrt x + 1", 4), 3);
+near("sinx", f("sinx", Math.PI / 2), 1);
+near("xsinx", f("xsinx", Math.PI / 2), Math.PI / 2);
+near("pix", f("pix", 2), 2 * Math.PI);
+near("sin x cos x", f("sin x cos x", Math.PI / 4), 0.5);
+near("3.5e-2x", f("3.5e-2x", 100), 3.5);
+near("2e", f("2e", 0), 2 * Math.E);
+near("x2", f("x2", 3), 6);
+near("1/x", f("1/x", 4), 0.25);
+near("x/2/2", f("x/2/2", 8), 2);
+near("2^3^2", f("2^3^2", 0), 512);
+near("√x", f("√x", 9), 3);
+near("π", f("π x", 1), Math.PI);
+near("min", f("max(x, 2)", 1), 2);
+near("f(x)=", f("f(x) = 3", 0), 3);
+const xe = (src: string) => { try { compileExpression(src); return "no error"; } catch (e) { return e instanceof ExprError ? e.message : "OTHER " + e; } };
+eq("y var", xe("x + y"), 'Write the function of x only, like "x^2 + 1".');
+eq("t var", xe("t^2"), 'Use x as the variable ("t" isn\'t defined).');
+eq("misspelt fn", xe("sinn(x)"), "\"sinn\" isn't a function I know. Try sin, cos, sqrt, ln, log, abs or exp.");
+eq("unknown fn", xe("foo(x)"), '"foo" isn\'t a function I know. Try sin, cos, sqrt, ln, log, abs or exp.');
+eq("unclosed", xe("sin(x"), '"sin(" is never closed: add ")".');
+eq("dangling", xe("x +"), "The function ends too early: something is missing at the end.");
+eq("bad char", xe("x # 2"), '"#" can\'t be used here.');
+eq("empty", xe(""), "Type a function of x, like x^2 or sin(x).");
+eq("niceStep", [niceStep(20), niceStep(1), niceStep(7)], [2, 0.1, 1]);
+eq("formatTick", [formatTick(0.30000000000000004, 0.1), formatTick(-2, 1), formatTick(1e-17, 0.5)], ["0.3", "−2", "0.0"]);
+
+
+// ------------------------------------------------ collaboration model
+
+const t = (id: string, text = id) => ({ id, type: "text" as const, x: 0, y: 0, text, color: "#000000", fontSize: 20, font: "sans" as const });
+const ids = (els: { id: string }[]) => els.map((e) => e.id).join("");
+
+// applyOps basics
+eq("append", ids(applyOps([t("a")], [{ t: "add", el: t("b") }])), "ab");
+eq("anchored chain", ids(applyOps([t("x"), t("y")], [{ t: "add", el: t("a"), after: "x" }, { t: "add", el: t("b"), after: "a" }])), "xaby");
+eq("bottom", ids(applyOps([t("x")], [{ t: "add", el: t("a"), after: null }])), "ax");
+eq("missing anchor -> top", ids(applyOps([t("x")], [{ t: "add", el: t("a"), after: "zz" }])), "xa");
+eq("set missing ignored", ids(applyOps([t("x")], [{ t: "set", el: t("q") }])), "x");
+eq("del", ids(applyOps([t("x"), t("y")], [{ t: "del", id: "x" }])), "y");
+const big = Array.from({ length: 20000 }, (_, i) => t("e" + i));
+const t0 = Date.now();
+const cleared = applyOps(big, big.map((e) => ({ t: "del" as const, id: e.id })));
+const restored = applyOps(cleared, big.map((e, i) => ({ t: "add" as const, el: e, after: i ? big[i - 1].id : null })));
+eq("20k clear+restore order", restored.map((e) => e.id).join(",") === big.map((e) => e.id).join(","), true);
+console.log("   (20k clear+restore took", Date.now() - t0, "ms)");
+
+// Two docs + a fake server
+let serverEls: CanvasElement[] = [t("base")];
+let version = 0;
+const log: RemoteChange[] = [];
+const A = new CollabDoc({ elements: serverEls, version });
+const B = new CollabDoc({ elements: serverEls, version });
+const send = (doc: CollabDoc) => {
+  const res = doc.unsent().map((b) => {
+    serverEls = applyOps(serverEls, b.ops);
+    version++;
+    log.push({ v: version, b: b.id, ops: JSON.parse(JSON.stringify(b.ops)) as DocOp[] });
+    return { id: b.id, version };
+  });
+  doc.acknowledge(res);
+};
+const deliver = (doc: CollabDoc) => { for (const c of log) doc.applyRemote(c); };
+
+A.dispatch({ type: "add", elements: [t("a1")] });
+B.dispatch({ type: "add", elements: [t("b1")] });
+eq("A shows own change", ids(A.elements), "basea1");
+send(A); send(B);
+deliver(A); deliver(B);
+eq("converge after concurrent adds A", ids(A.elements), "basea1b1");
+eq("converge after concurrent adds B", ids(B.elements), "basea1b1");
+eq("nothing pending", [A.getSnapshot().unsynced, B.getSnapshot().unsynced], [0, 0]);
+// concurrent edit of different elements
+const a1 = A.elements.find((e) => e.id === "a1")!;
+A.dispatch({ type: "update", elements: [{ ...a1, text: "A edit" } as CanvasElement] });
+const b1 = B.elements.find((e) => e.id === "b1")!;
+B.dispatch({ type: "update", elements: [{ ...b1, text: "B edit" } as CanvasElement] });
+send(B); send(A); deliver(A); deliver(B);
+const texts = (els: readonly CanvasElement[]) => els.map((e) => (e.type === "text" ? e.text : e.type));
+eq("both edits kept", texts(A.elements), ["base", "A edit", "B edit"]);
+eq("B same", JSON.stringify(A.elements) === JSON.stringify(B.elements), true);
+// per-user undo: A undoes its edit, B's edit stays
+A.dispatch({ type: "undo" });
+send(A); deliver(A); deliver(B);
+eq("A undo only reverts A", texts(B.elements), ["base", "a1", "B edit"]);
+// B deletes a1 while A edits it: deletion wins
+const a1b = A.elements.find((e) => e.id === "a1")!;
+A.dispatch({ type: "update", elements: [{ ...a1b, text: "late" } as CanvasElement] });
+B.dispatch({ type: "remove", ids: ["a1"] });
+send(B); send(A); deliver(A); deliver(B);
+eq("delete beats concurrent edit", ids(A.elements), "baseb1");
+eq("B agrees", ids(B.elements), "baseb1");
+// B undoes its delete: a1 comes back in its old place
+B.dispatch({ type: "undo" });
+send(B); deliver(A); deliver(B);
+eq("undo delete restores position", ids(A.elements), "basea1b1");
+// clear + undo restores order
+B.dispatch({ type: "clear" });
+send(B); deliver(A); deliver(B);
+eq("cleared", ids(A.elements), "");
+B.dispatch({ type: "undo" });
+send(B); deliver(A); deliver(B);
+eq("undo clear restores all in order", ids(A.elements), "basea1b1");
+// redo after undo
+B.dispatch({ type: "redo" });
+send(B); deliver(A); deliver(B);
+eq("redo clear", ids(A.elements), "");
+B.dispatch({ type: "undo" }); send(B); deliver(A); deliver(B);
+// gap detection and reset
+const C = new CollabDoc({ elements: [t("base")], version: 0 });
+eq("gap detected", C.applyRemote(log[2]), "gap");
+C.dispatch({ type: "add", elements: [t("c1")] });
+C.reset({ elements: serverEls, version });
+eq("reset keeps unsent local work on top", ids(C.elements), "basea1b1c1");
+send(C); deliver(C); deliver(A);
+eq("C's change reaches A", ids(A.elements), "basea1b1c1");
+eq("identity kept for own echo", A.elements.find((e) => e.id === "c1") !== C.elements.find((e) => e.id === "c1"), true);
+// dedupe ack for already-included batch
+const D = new CollabDoc({ elements: serverEls, version });
+D.restore([{ id: log[log.length - 1].b, ops: log[log.length - 1].ops }]);
+D.acknowledge([{ id: log[log.length - 1].b, version: log[log.length - 1].v }]);
+eq("restored batch already on server settles", D.getSnapshot().unsynced, 0);
+// ------------------------------------------------ to-do boards
+let n = 0;
+const nid = () => `id${++n}`;
+const kb0 = newKanban({ id: "kb", x: 100, y: 50, scale: 1, ids: nid });
+const withCards = (el: KanbanElement, col: number, texts: string[]): KanbanElement => ({
+  ...el,
+  columns: el.columns.map((c, i) => (i === col ? { ...c, cards: [...c.cards, ...texts.map((text) => ({ id: nid(), text }))] } : c)),
+});
+const kb = withCards(withCards(kb0, 0, ["Read ch. 4", "Redox", "Lab report"]), 1, ["Revise"]);
+const titles = (el: KanbanElement) => el.columns.map((c) => c.cards.map((k) => k.text).join(",")).join(" | ");
+eq("new board columns", kb0.columns.map((c) => c.title), ["To do", "Doing", "Done"]);
+eq("new board is valid", elementSchema.safeParse(kb).success, true);
+const L = kanbanLayout(kb);
+eq("three columns side by side", L.columns.map((c) => Math.round(c.rect.x - kb.x)), [14, 244, 474]);
+eq("columns share one height", new Set(L.columns.map((c) => c.rect.h)).size, 1);
+eq("height grows with cards", L.h > kanbanLayout(kb0).h, true);
+eq("box matches layout", elementBox(kb), { x: 100, y: 50, w: L.w, h: L.h });
+const c0 = L.columns[0].cards[0].rect;
+eq("card hit", kanbanPartAt(kb, { x: c0.x + 5, y: c0.y + 5 }), { kind: "card", columnId: kb.columns[0].id, cardId: kb.columns[0].cards[0].id });
+eq("add button hit", kanbanPartAt(kb, { x: L.columns[1].add.x + 4, y: L.columns[1].add.y + 4 }).kind, "add");
+eq("header hit", kanbanPartAt(kb, { x: L.columns[2].header.x + 30, y: L.columns[2].header.y + 10 }).kind, "header");
+eq("title hit", kanbanPartAt(kb, { x: L.title.x + 4, y: L.title.y + 4 }).kind, "title");
+eq("drop above first card", dropSlot(kb, { x: c0.x + 5, y: c0.y + 2 }).index, 0);
+eq("drop below last card", dropSlot(kb, { x: c0.x + 5, y: L.h + kb.y }).index, 3);
+eq("drop beside the board picks the nearest column", dropSlot(kb, { x: kb.x + L.w + 50, y: c0.y }).columnId, kb.columns[2].id);
+const redox = kb.columns[0].cards[1].id;
+const toDone = moveCard(kb, kb, { cardId: redox, columnId: kb.columns[2].id, index: 0 });
+eq("move to another column", toDone && titles(toDone[0]), "Read ch. 4,Lab report | Revise | Redox");
+const reorder = moveCard(kb, kb, { cardId: redox, columnId: kb.columns[0].id, index: 2 });
+eq("reorder within a column", reorder && titles(reorder[0]), "Read ch. 4,Lab report,Redox | Revise | ");
+eq("drop where it was changes nothing", moveCard(kb, kb, { cardId: redox, columnId: kb.columns[0].id, index: 1 }), null);
+const other = newKanban({ id: "kb2", x: 1000, y: 50, scale: 2, ids: nid });
+const across = moveCard(kb, other, { cardId: redox, columnId: other.columns[1].id, index: 0 });
+eq("move across boards changes both", across?.map((b) => b.id), ["kb", "kb2"]);
+eq("card left the first board", across && findCard(across[0], redox), null);
+eq("card arrived on the second", across && titles(across[1]), " | Redox | ");
+eq("missing card: no move", moveCard(kb, kb, { cardId: "nope", columnId: kb.columns[0].id, index: 0 }), null);
+eq("progress counts the last column", progress(toDone![0]), { total: 4, done: 1 });
+const wider = addColumn(kb, "c4");
+eq("add column", wider.columns.length, 4);
+eq("board grows by a column", Math.round(kanbanLayout(wider).columns[0].rect.w), Math.round(L.columns[0].rect.w));
+eq("remove column", removeColumn(wider, "c4").columns.length, 3);
+eq("can't remove the last column", removeColumn({ ...kb, columns: [kb.columns[0]] }, kb.columns[0].id).columns.length, 1);
+const bigBoard = scaleElement(kb, elementBox(kb), { x: 100, y: 50, w: L.w * 2, h: L.h * 2 });
+eq("corner resize scales the board", [bigBoard.type === "kanban" && bigBoard.scale, Math.round(elementBox(bigBoard).h)], [2, Math.round(L.h * 2)]);
+const wide = scaleElement(kb, elementBox(kb), { x: 100, y: 50, w: L.w * 1.5, h: L.h });
+eq("shift resize only widens", [wide.type === "kanban" && wide.scale, Math.round(elementBox(wide).w)], [1, Math.round(L.w * 1.5)]);
+const thin = scaleElement(kb, elementBox(kb), { x: 100, y: 50, w: 50, h: L.h });
+eq("never narrower than its columns", Math.round(elementBox(thin).w), Math.round(kanbanMinWidth(3, 1)));
+eq("long words wrap", wrapText("x".repeat(80), 100).length > 1, true);
+eq("newlines kept", wrapText("a\nb", 500), ["a", "b"]);
+eq("7 columns refused", elementSchema.safeParse({ ...kb, columns: [...kb.columns, ...kb.columns, kb.columns[0]] }).success, false);
+eq("empty card refused", elementSchema.safeParse(withCards(kb0, 0, ["  "])).success, false);
+
+// ------------------------------------------------ media
+const gif = { id: "g", type: "gif", assetId: "7a0e1f5c-3c6b-4c51-9a55-0e7a6c7b6f11", x: 0, y: 0, w: 320, h: 180 };
+const vid = { ...gif, id: "v", type: "video", assetId: "0d6f5c8e-2b1a-4f3e-8d7c-6b5a4f3e2d1c" };
+eq("gif element valid", elementSchema.safeParse(gif).success, true);
+eq("video element valid", elementSchema.safeParse(vid).success, true);
+eq("asset ids include GIFs and videos", [...assetIdsOf([gif, vid] as CanvasElement[])].length, 2);
+eq("range: first bytes", parseRange("bytes=0-99", 1000), { start: 0, end: 99 });
+eq("range: open-ended is capped", parseRange("bytes=100-", 10_000_000, 1000), { start: 100, end: 1099 });
+eq("range: open-ended near the end", parseRange("bytes=900-", 1000), { start: 900, end: 999 });
+eq("range: suffix", parseRange("bytes=-100", 1000), { start: 900, end: 999 });
+eq("range: end past the file is trimmed", parseRange("bytes=0-5000", 1000), { start: 0, end: 999 });
+eq("range: past the end", parseRange("bytes=1000-", 1000), "invalid");
+eq("range: backwards", parseRange("bytes=50-10", 1000), "invalid");
+eq("range: several ranges ignored", parseRange("bytes=0-1,5-6", 1000), null);
+eq("range: none", parseRange(null, 1000), null);
+
+// ------------------------------------------------ study buddies
+eq("level 1 at 0 points", levelFor(0), { level: 1, floor: 0, next: 20 });
+eq("level 2 at 20", levelFor(20).level, 2);
+eq("level 3 just below 100", levelFor(99).level, 3);
+eq("top level", levelFor(5000), { level: 10, floor: 1000, next: null });
+eq("unlocks by level", [accessoriesFor(1), accessoriesFor(4), accessoriesFor(9)], [[], ["scarf", "glasses"], ["scarf", "glasses", "cap"]]);
+eq("level-up line names the unlock", levelUp(4), "Level 4! I got reading glasses.");
+eq("streak: today and the two days before", streakFrom(["2026-11-18", "2026-11-17", "2026-11-16", "2026-11-14"], "2026-11-18"), 3);
+eq("streak still counts from yesterday", streakFrom(["2026-11-17", "2026-11-16"], "2026-11-18"), 2);
+eq("streak broken", streakFrom(["2026-11-15"], "2026-11-18"), 0);
+eq("streak across a month end", streakFrom(["2026-12-01", "2026-11-30"], "2026-12-01"), 2);
+eq("default settings are valid", settingsSchema.safeParse(DEFAULT_SETTINGS).success, true);
+eq("four buddies refused", settingsSchema.safeParse({ ...DEFAULT_SETTINGS, buddies: Array(4).fill(DEFAULT_SETTINGS.buddies[0]) }).success, false);
+const prog = (reviews: number): Progress => ({ today: { reviews, tasks: 0 }, streak: 1, points: reviews, level: 1, levelFloor: 0, nextLevel: 20 });
+eq("first answer gets a word", afterReview("good", prog(1), { answered: 1, missed: 0 }) !== null, true);
+eq("most answers get nothing", afterReview("good", prog(3), { answered: 3, missed: 0 }), null);
+eq("every fifth card today", afterReview("easy", prog(10), { answered: 4, missed: 0 })?.startsWith("10 cards today."), true);
+eq("first miss gets encouragement, the next doesn't", [afterReview("again", prog(2), { answered: 2, missed: 1 }) !== null, afterReview("again", prog(3), { answered: 3, missed: 2 })], [true, null]);
+const todoBoard = withCards(kb0, 0, ["Essay"]);
+const essay = todoBoard.columns[0].cards[0].id;
+const moved = moveCard(todoBoard, todoBoard, { cardId: essay, columnId: todoBoard.columns[2].id, index: 0 })!;
+eq("a card moved to Done is finished", finishedCards([todoBoard], moved), [essay]);
+eq("one already in Done isn't", finishedCards(moved, moved), []);
+eq("a card added straight to Done isn't", finishedCards([kb0], [withCards(kb0, 2, ["New"])]), []);
+eq("one-column boards have no Done", finishedCards([{ ...todoBoard, columns: [todoBoard.columns[0]] }], [{ ...todoBoard, columns: [todoBoard.columns[0]] }]), []);
+
+// ------------------------------------------------------------ seasonal themes
+eq("Easter Sundays", [2024, 2025, 2026, 2027, 2038, 2285].map(easterSunday), [
+  { month: 3, day: 31 },
+  { month: 4, day: 20 },
+  { month: 4, day: 5 },
+  { month: 3, day: 28 },
+  { month: 4, day: 25 },
+  { month: 3, day: 22 },
+]);
+const on = (y: number, m: number, d: number) => themeForDate(new Date(y, m - 1, d, 12));
+eq("Christmas runs December 1–26", [on(2026, 11, 30), on(2026, 12, 1), on(2026, 12, 26), on(2026, 12, 27)], [null, "christmas", "christmas", null]);
+eq("Halloween runs October 15–31", [on(2026, 10, 14), on(2026, 10, 15), on(2026, 10, 31), on(2026, 11, 1)], [null, "halloween", "halloween", null]);
+eq("Easter runs Palm Sunday to Easter Monday (2026: Mar 29 – Apr 6)", [on(2026, 3, 28), on(2026, 3, 29), on(2026, 4, 5), on(2026, 4, 6), on(2026, 4, 7)], [null, "easter", "easter", "easter", null]);
+eq("…and moves with the calendar (2027: Mar 21 – Mar 29)", [on(2027, 3, 20), on(2027, 3, 21), on(2027, 3, 29), on(2027, 3, 30)], [null, "easter", "easter", null]);
+eq("a forced theme or off ignores the date", [resolveTheme("halloween", new Date(2026, 5, 1)), resolveTheme("off", new Date(2026, 11, 10)), resolveTheme("auto", new Date(2026, 11, 10))], ["halloween", null, "christmas"]);
+
+// ------------------------------------------------------------ admin dashboard URLs
+eq("the five-page window", [pageWindow(1, 9), pageWindow(5, 9), pageWindow(9, 9), pageWindow(2, 3)], [[1, 2, 3, 4, 5], [3, 4, 5, 6, 7], [5, 6, 7, 8, 9], [1, 2, 3]]);
+const parsed = parseAdminQuery({ q: " ada ", role: "admin", status: "members", page: "3", user: "nope" });
+eq("parsing the address ignores what doesn't make sense", parsed, { q: "ada", role: "admin", status: "members", page: 3, user: null });
+eq("bad pages and roles fall back", parseAdminQuery({ page: "-2", role: "owner" }), { q: "", role: null, status: null, page: 1, user: null });
+eq("a new search goes back to page 1", adminHref(parsed, { q: "grace" }), "/admin?q=grace&role=admin&status=members");
+eq("changing the page keeps the search", adminHref(parsed, { page: 4 }), "/admin?q=ada&role=admin&status=members&page=4");
+
+// ------------------------------------------------------------ settings and profile pictures
+eq("preferences: junk falls back to the defaults", parsePreferences({ drawEffect: "sparkles", boardEffects: "yes" }), DEFAULT_PREFERENCES);
+eq("preferences: valid choices are kept", parsePreferences({ drawEffect: "trace", boardEffects: false }), { drawEffect: "trace", boardEffects: false });
+eq("preferences: nothing stored yet", parsePreferences(null), DEFAULT_PREFERENCES);
+eq("no picture, no URL", avatarUrl("u1", null), null);
+eq("the URL carries the picture's version", avatarUrl("u1", new Date(1_800_000_000_000)), "/api/avatars/u1?v=" + (1_800_000_000_000).toString(36));
+const bytes = (...b: number[]) => new Uint8Array([...b, ...new Array(12).fill(0)]);
+eq("sniffing picture types from their first bytes", [
+  sniffImageType(bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)),
+  sniffImageType(bytes(0xff, 0xd8, 0xff, 0xe0)),
+  sniffImageType(new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x45, 0x42, 0x50])),
+  sniffImageType(new TextEncoder().encode("<svg xmlns='http://www.w3.org/2000/svg'/>")),
+  sniffImageType(new TextEncoder().encode("GIF89a.........")),
+], ["image/png", "image/jpeg", "image/webp", null, null]);
+
+// ------------------------------------------------------------ drawing effects
+const fxStroke = (id: string, x = 0): CanvasElement => ({ id, type: "stroke", brush: "ink", color: "#201f24", size: 4, points: [x, 0, x + 300, 0, x + 300, 400] });
+eq("ink length follows the stroke", inkLength(fxStroke("a")), 700);
+eq("traces take 0.3–1 s, longer for longer lines", [traceDuration(fxStroke("a"), 0.01), traceDuration(fxStroke("a"), 1), traceDuration(fxStroke("a"), 8)], [0.3, 0.6875, 1]);
+eq("a batch is staggered to fit its time", [staggerStep(1, 1), staggerStep(10, 1.1), Math.round(staggerStep(100, 1.1) * 1000)], [0, 0.06, 11]);
+let frames = 0;
+const off = new ElementEffects("off", () => frames++);
+eq("effects off: nothing waits or animates", [off.enabled, off.busy, off.stateOf(fxStroke("a"))], [false, false, undefined]);
+const pop = new ElementEffects("pop", () => frames++);
+eq("a drawing that's opening stays hidden until its replay", pop.stateOf(fxStroke("a")), { kind: "pop", t: 0 });
+const view = { x: 0, y: 0, w: 1000, h: 800 };
+pop.open([fxStroke("a"), fxStroke("b", 5000)], view, 1);
+eq("…then only what's in view replays", [!!pop.stateOf(fxStroke("a")), pop.stateOf(fxStroke("b", 5000))], [true, undefined]);
+pop.finishAll();
+eq("finishing jumps to the end", [pop.busy, pop.stateOf(fxStroke("a"))], [false, undefined]);
+const many = Array.from({ length: MAX_ANIMATED + 1 }, (_, i) => fxStroke(`m${i}`));
+const crowded = new ElementEffects("trace", () => frames++);
+crowded.open(many, view, 1);
+eq("a very full view just appears", [crowded.busy, crowded.stateOf(many[0])], [false, undefined]);
+pop.leave(fxStroke("a"));
+eq("an erased element stays as a ghost while it leaves", [[...pop.ghosts()].length, pop.isLeaving("a"), pop.stateOf(fxStroke("a"))], [1, true, undefined]);
+pop.dispose();
+const traceFx = new ElementEffects("trace", () => frames++);
+traceFx.open([], view, 1);
+traceFx.leave(fxStroke("a"));
+eq("a traced element fades out (a trace doesn't run backwards)", [...traceFx.ghosts()].map((g) => g.state.kind), ["fade"]);
+traceFx.dispose();
+
+// ------------------------------------------------------------ to-do board effects
+const fxBoard = newKanban({ id: "kb", x: 0, y: 0, scale: 1, ids: (() => { let n = 0; return () => `k${n++}`; })() });
+const firstCol = fxBoard.columns[0];
+const withTwo: KanbanElement = { ...fxBoard, columns: fxBoard.columns.map((c, i) => (i === 0 ? { ...c, cards: [{ id: "c1", text: "Read chapter 4" }, { id: "c2", text: "Problem set" }] } : c)) };
+const lastCol = withTwo.columns[withTwo.columns.length - 1];
+const finished = moveCard(withTwo, withTwo, { cardId: "c1", columnId: lastCol.id, index: 0 })![0] as KanbanElement;
+const kfx = new KanbanEffects(true, () => frames++);
+kfx.change(withTwo, finished);
+const glide = kfx.card("kb", "c1");
+eq("a moved card starts where it was and glides to its slot", [!!glide && Math.abs(glide.dx) > 10, glide?.strike], [true, 0]);
+eq("the card under it moves up from its old place", (kfx.card("kb", "c2")?.dy ?? 0) > 0, true);
+eq("the progress bar starts from the old share", kfx.progress("kb"), 0);
+kfx.dispose();
+kfx.noteDrop("kb", "c1", { x: 900, y: 900 });
+kfx.change(withTwo, finished);
+const dropped = kfx.card("kb", "c1");
+const slot = kanbanLayout(finished).columns.at(-1)!.cards[0].rect;
+eq("a dropped card glides from where it was let go", [dropped?.dx, dropped?.dy], [900 - slot.x, 900 - slot.y]);
+kfx.dispose();
+kfx.noteDrop("kb", "c1", { x: 900, y: 900 }, [finished]);
+kfx.change(withTwo, finished);
+eq("after a drag, only the dropped card moves (the preview already opened its slot) and gets crossed out", [!!kfx.card("kb", "c1"), kfx.card("kb", "c1")?.strike, kfx.card("kb", "c2")], [true, 0, undefined]);
+kfx.dispose();
+const shifted = { ...withTwo, x: withTwo.x + 120, y: withTwo.y + 40 };
+kfx.change(withTwo, shifted);
+eq("moving the whole board doesn't make cards lag behind", [kfx.card("kb", "c1"), kfx.busy], [undefined, false]);
+const added: KanbanElement = { ...withTwo, columns: withTwo.columns.map((c) => (c.id === firstCol.id ? { ...c, cards: [...c.cards, { id: "c3", text: "New" }] } : c)) };
+kfx.change(withTwo, added);
+eq("a new card pops in", [kfx.card("kb", "c3")?.alpha, kfx.card("kb", "c3")?.scale], [0, 0.9]);
+kfx.setEnabled(false);
+kfx.change(withTwo, finished);
+eq("board effects off: no animations", kfx.busy, false);
+
+// ------------------------------------------------------------ panda battles
+/** A repeatable random sequence (mulberry32). */
+const seeded = (seed: number) => () => {
+  seed |= 0;
+  seed = (seed + 0x6d2b79f5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+const always = (v: number) => () => v;
+eq("which rarities turn up at each level", [1, 2, 3, 5, 7].map((l) => raritiesAt(l).join(",")), ["common", "common", "common,uncommon", "common,uncommon,rare", "common,uncommon,rare,superRare"]);
+{
+  const rng = seeded(3);
+  const first = Array.from({ length: 300 }, () => rollWild(1, rng));
+  eq(
+    "wild pandas turn up from level 1: common ones, level 1 or 2",
+    [first.every((w) => w?.rarity === "common"), Math.min(...first.map((w) => w!.level)), Math.max(...first.map((w) => w!.level))],
+    [true, 1, 2],
+  );
+}
+{
+  const rng = seeded(7);
+  const counts: Record<string, number> = { common: 0, uncommon: 0, rare: 0, superRare: 0 };
+  for (let i = 0; i < 20000; i++) counts[pickRarity(10, rng)!]++;
+  const shares = [counts.common, counts.uncommon, counts.rare, counts.superRare].map((n) => n / 200);
+  eq("rarities come about as often as their weights say (58/28/11/3, within 2 points)", [58, 28, 11, 3].every((want, i) => Math.abs(shares[i] - want) < 2), true, );
+  const wild = Array.from({ length: 400 }, () => rollWild(4, rng)!);
+  eq("at level 4: only common and uncommon, levels 3–5", [new Set(wild.map((w) => w.rarity)).size, Math.min(...wild.map((w) => w.level)), Math.max(...wild.map((w) => w.level))], [2, 3, 5]);
+  eq("every wild trick suits its rarity", wild.every((w) => ABILITY_POOL[w.rarity].includes(w.ability)), true);
+}
+eq("Bao sprints; other made-up buddies get a common trick", [starterAbility("bao"), ABILITY_POOL.common.includes(starterAbility("b1x9")), starterAbility("b1x9") === starterAbility("b1x9")], ["sprint", true, true]);
+eq("bamboo: 5 to start and one per 10 points, less what's been offered", [bambooFor(0, 0), bambooFor(37, 2), bambooFor(5, 9)], [5, 6, 0]);
+eq("old buddy settings get the new switches", (({ roam, tricks, wild }) => ({ roam, tricks, wild }))(settingsSchema.parse({ visible: true, wander: true, dailyGoal: 20, buddies: [{ id: "bao", name: "Bao", color: "#277c78", x: null, y: null }] })), { roam: false, tricks: true, wild: true });
+eq("levelling up mentions what can turn up now", [levelUp(2), levelUp(5), levelUp(9)], ["Level 2! I got a scarf.", "Level 5! Rare pandas can turn up now.", "Level 9!"]);
+
+const mochi = { id: "mochi", name: "Mochi", rarity: "common" as const, ability: "sprint" as const, color: "#277c78" };
+const bao = { id: "bao", name: "Bao", rarity: "common" as const, ability: "nap" as const, color: "#c94736" };
+const pip = { id: "wild", name: "Pip", rarity: "rare" as const, ability: "roll" as const, level: 3, color: "" };
+eq("a level 3 common panda: energy, strength, speed (sprinters are quick)", (({ maxHp, attack, speed }) => ({ maxHp, attack, speed }))(makeFighter({ ...mochi, level: 3 })), { maxHp: 42, attack: 12, speed: 24 });
+eq("a rare one is tougher", makeFighter({ ...pip }).maxHp, 51);
+const opened = startBattle({ team: [mochi, bao], wild: pip, yourLevel: 3, bamboo: 4 });
+eq("a battle starts with the wild panda and your first buddy", opened.steps.map((s) => s.text), ["A rare panda wanders up: it's Pip!", "Go, Mochi!"]);
+const fresh = opened.state;
+eq("…your buddies fight at your level", fresh.you.map((b) => b.level), [3, 3]);
+eq("the weaker it is, the likelier bamboo works; rarer is harder", [
+  catchChance({ ...fresh.wild, hp: fresh.wild.maxHp }, 3) < catchChance({ ...fresh.wild, hp: 5 }, 3),
+  catchChance({ ...makeFighter({ ...pip, rarity: "common" }), hp: 5 }, 3) > catchChance({ ...fresh.wild, hp: 5 }, 3),
+], [true, true]);
+{
+  const r = act(fresh, { type: "move", move: "special" }, always(0.5));
+  eq("Dash goes first even against something as quick", r.steps[0].text, "Mochi used Dash!");
+  eq("…and does damage", [r.state.wild.hp < fresh.wild.hp, r.steps.some((s) => s.fx?.kind === "hit" && s.fx.side === "wild")], [true, true]);
+  eq("the old state is left alone", fresh.wild.hp, fresh.wild.maxHp);
+}
+{
+  const r = act(fresh, { type: "bamboo" }, always(0));
+  eq("bamboo that's taken: three nibbles and it joins you", [r.state.over, r.steps[0].fx, r.state.bamboo], ["caught", { kind: "bamboo", wobbles: 3, caught: true }, 3]);
+  const no = act(fresh, { type: "bamboo" }, always(0.99));
+  eq("bamboo pushed away: the wild panda gets its turn", [no.state.over, no.steps[0].fx, no.steps[1].text, no.steps[2].text], [null, { kind: "bamboo", wobbles: 0, caught: false }, "Pip pushed it away!", "Pip used Roll!"]);
+  let threw = "";
+  try {
+    act({ ...fresh, bamboo: 0 }, { type: "bamboo" }, Math.random);
+  } catch (e) {
+    threw = e instanceof BattleError ? e.message : "";
+  }
+  eq("no bamboo left: refused", threw, "You're out of bamboo. Study a little to earn more.");
+}
+{
+  const nearlyOut: BattleState = { ...fresh, you: fresh.you.map((b, i) => (i === 0 ? { ...b, hp: 1 } : b)) };
+  // rng 0.5: the wild panda swipes first (Mochi's Bump has no priority, and Pip is quicker).
+  const slow: BattleState = { ...nearlyOut, you: nearlyOut.you.map((b) => ({ ...b, speed: 1 })) };
+  const r = act(slow, { type: "move", move: "bump" }, always(0.5));
+  eq("worn out with another buddy left: you must pick one", [r.state.mustSwitch, r.state.over, r.steps.at(-1)?.text], [true, null, "Who's next?"]);
+  let blocked = false;
+  try {
+    act(r.state, { type: "move", move: "bump" }, always(0.5));
+  } catch {
+    blocked = true;
+  }
+  eq("…nothing else until you do", blocked, true);
+  const sw = act(r.state, { type: "switch", to: 1 }, always(0.5));
+  eq("…and that switch is free (no wild turn)", [sw.state.active, sw.steps.map((s) => s.text)], [1, ["Go, Bao!"]]);
+  const alone: BattleState = { ...slow, you: [slow.you[0]] };
+  eq("worn out with nobody left: the battle's lost", act(alone, { type: "move", move: "bump" }, always(0.5)).state.over, "lost");
+}
+{
+  const weak: BattleState = { ...fresh, wild: { ...fresh.wild, hp: 1 } };
+  const r = act(weak, { type: "move", move: "special" }, always(0.5));
+  eq("wearing it out ends it (it wanders off, uncaught)", [r.state.over, r.steps.at(-1)?.text], ["won", "Pip wanders off for a rest."]);
+  let over = false;
+  try {
+    act(r.state, { type: "run" }, Math.random);
+  } catch {
+    over = true;
+  }
+  eq("nothing more once it's over", over, true);
+  eq("running away always works", act(fresh, { type: "run" }, Math.random).state.over, "ran");
+}
+{
+  const seq = [0.99, 0.99];
+  const r = act({ ...fresh, turn: 1 }, { type: "move", move: "stare" }, () => seq.shift() ?? 0.01);
+  eq("a rare panda may run off from the second turn", r.state.over, "fled");
+  const early = act({ ...fresh, turn: 0 }, { type: "move", move: "stare" }, () => 0.01);
+  eq("…but not before", early.state.over === "fled", false);
+}
+{
+  let ok = true;
+  let longest = 0;
+  for (let seed = 1; seed <= 300; seed++) {
+    const rng = seeded(seed);
+    let { state } = startBattle({ team: [mochi, bao], wild: { ...pip, rarity: (["common", "uncommon", "rare", "superRare"] as const)[seed % 4] }, yourLevel: 1 + (seed % 9), bamboo: 3 });
+    let turns = 0;
+    while (!state.over && turns < 200) {
+      const live = state.you.map((b, i) => [b, i] as const).filter(([b, i]) => b.hp > 0 && i !== state.active);
+      const roll = rng();
+      const action = state.mustSwitch
+        ? { type: "switch" as const, to: live[0][1] }
+        : roll < 0.15 && state.bamboo > 0
+          ? { type: "bamboo" as const }
+          : { type: "move" as const, move: (["bump", "swipe", "stare", "special"] as const)[Math.floor(rng() * 4)] };
+      state = act(state, action, rng).state;
+      turns++;
+      if (state.you.some((b) => b.hp < 0 || b.hp > b.maxHp) || state.wild.hp < 0 || state.wild.hp > state.wild.maxHp) ok = false;
+    }
+    if (!state.over) ok = false;
+    longest = Math.max(longest, turns);
+  }
+  eq("300 random battles all end, with energy always in range", [ok, longest < 60], [true, true]);
+}
+
+// ------------------------------------------------------------ wild panda rules (admins change these)
+eq("rules: nothing stored is the defaults", rulesFrom(undefined), DEFAULT_RULES);
+eq("…the defaults are today's numbers", [DEFAULT_RULES.on, DEFAULT_RULES.chance, DEFAULT_RULES.gapMinutes, DEFAULT_RULES.stayMinutes, DEFAULT_RULES.kinds.rare], [true, 0.6, 4, 3, { weight: 11, minLevel: 5, levelBonus: 1, catchRate: 0.38, flee: 0.06 }]);
+eq(
+  "rules: an out-of-range value falls back by itself, the rest are kept",
+  (({ on, chance, gapMinutes, kinds }) => [on, chance, gapMinutes, kinds.rare, kinds.common])(rulesFrom({ on: false, chance: 7, gapMinutes: 10, kinds: { rare: { weight: -5, minLevel: 2 } } })),
+  [false, 0.6, 10, { ...DEFAULT_KINDS.rare, minLevel: 2 }, DEFAULT_KINDS.common],
+);
+eq("rules: junk is the defaults", [rulesFrom("nope"), rulesFrom([1, 2])], [DEFAULT_RULES, DEFAULT_RULES]);
+const ruleForm = (over: Record<string, string | null> = {}) => {
+  const fd = new FormData();
+  const base: Record<string, string> = { on: "on", chance: "60", gapMinutes: "4", stayMinutes: "3" };
+  for (const [r, k] of Object.entries(DEFAULT_KINDS)) {
+    base[`${r}.weight`] = String(k.weight);
+    base[`${r}.minLevel`] = String(k.minLevel);
+    base[`${r}.levelBonus`] = String(k.levelBonus);
+    base[`${r}.catchRate`] = String(Math.round(k.catchRate * 100));
+    base[`${r}.flee`] = String(Math.round(k.flee * 100));
+  }
+  for (const [k, v] of Object.entries({ ...base, ...over })) if (v !== null) fd.set(k, v);
+  return fd;
+};
+eq("the admin form: today's numbers read back as the defaults", rulesFromForm(ruleForm()).rules, DEFAULT_RULES);
+eq("…switched off when the switch isn't sent", rulesFromForm(ruleForm({ on: null })).rules?.on, false);
+eq(
+  "…percents become fractions, minutes stay minutes",
+  (({ chance, gapMinutes, stayMinutes, kinds }) => [chance, gapMinutes, stayMinutes, kinds.superRare.catchRate, kinds.superRare.flee])(
+    rulesFromForm(ruleForm({ chance: "100", gapMinutes: "1", stayMinutes: "10", "superRare.catchRate": "50", "superRare.flee": "0" })).rules!,
+  ),
+  [1, 1, 10, 0.5, 0],
+);
+eq(
+  "…numbers out of range, or not whole, are refused by name",
+  rulesFromForm(ruleForm({ chance: "0", "rare.weight": "abc", "superRare.flee": "51", "common.minLevel": "2.5", stayMinutes: "" })).errors,
+  {
+    chance: "From 1 to 100 %.",
+    stayMinutes: "A whole number from 1 to 30.",
+    "common.minLevel": "A whole number from 1 to 10.",
+    "rare.weight": "A whole number from 0 to 1000.",
+    "superRare.flee": "From 0 to 50 %.",
+  },
+);
+eq(
+  "…and so is every kind set to never",
+  rulesFromForm(ruleForm({ "common.weight": "0", "uncommon.weight": "0", "rare.weight": "0", "superRare.weight": "0" })).errors,
+  { form: "Give at least one kind a chance to turn up, or switch wild pandas off instead." },
+);
+eq("shares at the top level: 58/28/11/3 %", Object.values(sharesAt(10, DEFAULT_KINDS)).map((s) => Math.round(s * 100)), [58, 28, 11, 3]);
+eq("…at level 1, all common", Object.values(sharesAt(1, DEFAULT_KINDS)), [1, 0, 0, 0]);
+const goldOnly = { ...DEFAULT_KINDS, common: { ...DEFAULT_KINDS.common, weight: 0 }, uncommon: { ...DEFAULT_KINDS.uncommon, weight: 0 }, rare: { ...DEFAULT_KINDS.rare, weight: 0 }, superRare: { ...DEFAULT_KINDS.superRare, minLevel: 1, levelBonus: 4 } };
+eq("kinds set to never don't turn up; the rest from their own level", [raritiesAt(10, goldOnly).join(), pickRarity(1, Math.random, goldOnly), firstLevel(goldOnly)], ["superRare", "superRare", 1]);
+eq("…with their own level above yours", rollWild(2, always(0.5), goldOnly)?.level, 2 + 0 + 4);
+eq("the first level anyone meets one", [firstLevel(DEFAULT_KINDS), firstLevel({ ...DEFAULT_KINDS, common: { ...DEFAULT_KINDS.common, weight: 0 } })], [1, 3]);
+eq("how far apart they turn up", [apartText(DEFAULT_RULES), apartText({ chance: 1, gapMinutes: 1 }), apartText({ chance: 0.05, gapMinutes: 10 })], ["about one every 6½ minutes", "about one every 1 minute", "about one every 3½ hours"]);
+eq("what browsers are told", openingsOf({ ...DEFAULT_RULES, on: false, kinds: goldOnly }), { on: false, stayMinutes: 3, from: { common: null, uncommon: null, rare: null, superRare: 1 } });
+eq(
+  "levelling up follows the rules: the first level they meet one, and new kinds",
+  [levelUp(3, { common: 3, uncommon: 3, rare: 5, superRare: null }), levelUp(5, { common: 1, uncommon: 3, rare: null, superRare: 5 }), levelUp(7, { common: 1, uncommon: 3, rare: 5, superRare: null })],
+  ["Level 3! Wild pandas can find your drawings now.", "Level 5! Super rare pandas can turn up now.", "Level 7!"],
+);
+{
+  const easy = startBattle({ team: [mochi, bao], wild: pip, yourLevel: 3, bamboo: 4, rates: { catchRate: 0.9, flee: 0 } });
+  const usual = startBattle({ team: [mochi, bao], wild: pip, yourLevel: 3, bamboo: 4 });
+  eq("a battle keeps the rates it started with (its rarity's by default)", [easy.state.rates, usual.state.rates], [{ catchRate: 0.9, flee: 0 }, { catchRate: 0.38, flee: 0.06 }]);
+  const tired = (s: BattleState): BattleState => ({ ...s, wild: { ...s.wild, hp: 5 } });
+  eq("…and bamboo works by them", viewOf(tired(easy.state)).chance > viewOf(tired(usual.state)).chance, true);
+  const legacy = { ...usual.state, rates: undefined };
+  eq("battles from before keep their rarity's numbers", ratesOf(legacy), { catchRate: 0.38, flee: 0.06 });
+  // Your buddies at level 10, so staring it down for a while wears nobody out.
+  const runner = startBattle({ team: [mochi, bao], wild: pip, yourLevel: 10, bamboo: 4, rates: { catchRate: 0.38, flee: 1 } }).state;
+  let s = runner;
+  for (let i = 0; i < 2 && !s.over && !s.mustSwitch; i++) s = act(s, { type: "move", move: "stare" }, always(0.5)).state;
+  eq("one set to always run off goes at the end of turn two", [s.turn, s.over], [2, "fled"]);
+  let calm = startBattle({ team: [mochi, bao], wild: pip, yourLevel: 10, bamboo: 4, rates: { catchRate: 0.38, flee: 0 } }).state;
+  for (let i = 0; i < 6 && !calm.over && !calm.mustSwitch; i++) calm = act(calm, { type: "move", move: "stare" }, seeded(40 + i)).state;
+  eq("…and one set to never doesn't", [calm.turn >= 3, calm.over === "fled"], [true, false]);
+}
+
+// ------------------------------------------------------------ pandas keeping off the drawing
+{
+  const room = { x: 0, y: 100, w: 1000, h: 500 };
+  const body = { hw: 25, h: 66 };
+  // A wall down the middle with a gap near the bottom, and a box.
+  const wall: CanvasElement = { id: crypto.randomUUID(), type: "rect", color: "#201f24", size: 2, fill: null, x: 480, y: 0, w: 40, h: 480 };
+  const box: CanvasElement = { id: crypto.randomUUID(), type: "rect", color: "#201f24", size: 2, fill: null, x: 100, y: 250, w: 200, h: 150 };
+  const obstacles = obstaclesOf([wall, box]);
+  const g = buildGrid(room, obstacles, body, 20, 6);
+  eq("a spot over the box is blocked, clear paper isn't", [isFree(g, { x: 200, y: 360 }), isFree(g, { x: 800, y: 300 })], [false, true]);
+  eq("standing just under the box counts as on it (its body rises over it)", touchesDrawing({ x: 200, y: 420 }, body, obstacles), true);
+  eq("…but well below it doesn't", touchesDrawing({ x: 200, y: 520 }, body, obstacles), false);
+  const from = { x: 360, y: 200 };
+  const to = { x: 800, y: 200 };
+  eq("a straight walk through the wall isn't clear", clearLine(g, from, to), false);
+  const path = findPath(g, from, to);
+  const blockedOnWay = path ? !pathClear(g, path) : true;
+  eq("the way round goes through the gap, never over anything", [!!path, blockedOnWay, path?.some((p) => p.y > 480 + body.h)], [true, false, true]);
+  // Every point along the way keeps the whole panda off both shapes.
+  let touching = 0;
+  if (path) {
+    for (let i = 1; i < path.length; i++) {
+      for (let k = 0; k <= 20; k++) {
+        const p = { x: path[i - 1].x + ((path[i].x - path[i - 1].x) * k) / 20, y: path[i - 1].y + ((path[i].y - path[i - 1].y) * k) / 20 };
+        if (touchesDrawing(p, body, obstacles)) touching++;
+      }
+    }
+  }
+  eq("…checked every step of the way", touching, 0);
+  eq("it's straightened (only turns where it must)", (path?.length ?? 99) <= 5, true);
+  eq("a blocked spot can't be a destination", findPath(g, from, { x: 500, y: 200 }), null);
+  const near = nearestFree(g, { x: 200, y: 330 });
+  eq("the nearest clear spot to one on the box is off it", !!near && !touchesDrawing(near, body, obstacles), true);
+  const sealed = buildGrid(room, obstaclesOf([{ ...wall, id: crypto.randomUUID(), y: 0, h: 700 }]), body, 20, 6);
+  eq("with no gap, there's no way across", findPath(sealed, from, to), null);
+  eq("free spots and edge spots are on clear paper", [freeSpots(g).every((p) => isFree(g, p)), edgeSpots(g, "left").length > 0], [true, true]);
+  // A long scribble is cut into pieces: the space it curls round stays walkable.
+  const loop: number[] = [];
+  for (let a = 0; a <= Math.PI * 2 + 0.01; a += 0.1) loop.push(700 + Math.cos(a) * 200, 350 + Math.sin(a) * 200);
+  const scribble: CanvasElement = { id: crypto.randomUUID(), type: "stroke", color: "#201f24", size: 4, points: loop };
+  const pieces = obstaclesOf([scribble]);
+  eq("a pen stroke becomes many small pieces", pieces.length > 15 && pieces.every((p) => p.w < 80 && p.h < 80), true);
+  eq("…so the middle of a drawn circle is clear", touchesDrawing({ x: 700, y: 380 }, body, pieces), false);
+  eq("erasers aren't obstacles", obstaclesOf([{ id: crypto.randomUUID(), type: "eraser", size: 20, points: [0, 0, 500, 500] }]).length, 0);
+}
+
+console.log(fails ? `\n${fails} FAILED` : "\nall passed");
+process.exit(fails ? 1 : 0);

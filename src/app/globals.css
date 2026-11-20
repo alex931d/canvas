@@ -1,26 +1,835 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:is(.dark *));
+/* Desktop sidebar on laptop-height screens: tighten the vertical rhythm. */
+@custom-variant short (@media (min-width: 48rem) and (max-height: 940px));
+@custom-variant shorter (@media (min-width: 48rem) and (max-height: 820px));
+
+/*
+ * Warm-beige dashboard palette: beige page, flat white cards, near-black
+ * sidebar and primary buttons, teal green as the accent, red for mistakes.
+ * The tokens below name its roles (card, muted text, ring…); the component
+ * kit in src/components/kit uses the named palette directly.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --radius: 0.5rem;
+
+  --background: #f8f4f0; /* beige 100 */
+  --foreground: #201f24; /* grey 900 */
+  --card: #ffffff;
+  --card-foreground: #201f24;
+  --popover: #ffffff;
+  --popover-foreground: #201f24;
+  --primary: #201f24;
+  --primary-foreground: #ffffff;
+  --secondary: #f8f4f0;
+  --secondary-foreground: #201f24;
+  --muted: #f2f2f2; /* grey 100 */
+  --muted-foreground: #696868; /* grey 500 */
+  --accent: #f8f4f0;
+  --accent-foreground: #201f24;
+  --destructive: #c94736; /* red */
+  --border: #f2f2f2;
+  --input: #98908b; /* beige 500 */
+  --ring: #277c78;
+
+  --success: #277c78; /* green */
+  --warning: #be6c49; /* orange */
 }
 
 @theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@theme {
+  /* Named palette, used for chart-style accents and drawing colours. */
+  --color-beige-100: #f8f4f0;
+  --color-beige-500: #98908b;
+  --color-grey-900: #201f24;
+  --color-grey-500: #696868;
+  --color-grey-300: #b3b3b3;
+  --color-grey-100: #f2f2f2;
+  --color-green: #277c78;
+  --color-sand: #f2cdac;
+  --color-cyan: #82c9d7;
+  --color-navy: #626070;
+  --color-red: #c94736;
+  --color-purple: #826cb0;
+  --color-gold: #cab361;
+  --color-blue: #3f82b2;
+  --color-orange: #be6c49;
+
+  --font-sans: "Public Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-hand: "Caveat", "Comic Sans MS", cursive;
+
+  /* Panels floating over the canvas. */
+  --shadow-float: 0 1px 2px rgb(32 31 36 / 0.08), 0 8px 24px -8px rgb(32 31 36 / 0.18);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    color-scheme: light;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* ------------------------------------------------------------------
+ * Study buddies (src/components/buddy). CSS modules don't work with this
+ * Turbopack setup, so the pandas' animations live here, under .buddy-*.
+ * ------------------------------------------------------------------ */
+
+.buddy-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.buddy {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 64px;
+  height: 72px;
+  pointer-events: auto;
+  touch-action: none;
+  border-radius: 18px;
+  transition: transform 3.2s ease-in-out;
+  will-change: transform;
+}
+.buddy[data-moving="instant"] {
+  transition: none;
+}
+.buddy:focus-visible {
+  outline: 3px solid var(--color-ring);
+  outline-offset: 2px;
+}
+.buddy-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 2px 3px rgb(32 31 36 / 0.12));
+}
+.buddy[data-facing="left"] .buddy-svg {
+  transform: scaleX(-1);
+}
+
+.buddy-svg :is(.buddy-body, .buddy-head, .buddy-arm, .buddy-leg, .buddy-eyes, .buddy-sparkles, .buddy-zzz, .buddy-tassel, .buddy-dust circle, .buddy-speed, .buddy-bamboo, .buddy-glow) {
+  transform-box: fill-box;
+}
+.buddy-body {
+  transform-origin: 50% 100%;
+  animation: buddy-bob 2.8s ease-in-out infinite;
+}
+.buddy-head {
+  transform-origin: 50% 90%;
+}
+.buddy-arm {
+  transform-origin: 50% 12%;
+  transition: transform 0.25s ease-out;
+}
+.buddy-arm-l {
+  transform: rotate(22deg);
+}
+.buddy-arm-r {
+  transform: rotate(-22deg);
+}
+.buddy-eyes {
+  transform-origin: 50% 50%;
+  animation: buddy-blink 5.5s infinite;
+}
+.buddy-sparkles,
+.buddy-zzz,
+.buddy-dust,
+.buddy-speed,
+.buddy-bamboo {
+  opacity: 0;
+}
+/* the golden coat: a soft glow, and a glint now and then */
+.buddy-glow {
+  opacity: 0.32;
+  filter: blur(7px);
+  transform-origin: 50% 50%;
+  animation: buddy-glow 3.4s ease-in-out infinite;
+}
+.buddy-svg:has(.buddy-glow) .buddy-sparkles {
+  animation: buddy-glint 3.4s ease-in-out infinite;
+}
+.buddy-tassel {
+  transform-origin: 0% 0%;
+  animation: buddy-swing 2.8s ease-in-out infinite;
+}
+
+/* walking: a little waddle */
+[data-pose="walk"] .buddy-body {
+  animation: buddy-waddle 0.7s ease-in-out infinite;
+}
+/* held up by the pointer: dangling */
+[data-pose="drag"] .buddy-body {
+  transform-origin: 50% 0%;
+  animation: buddy-dangle 0.9s ease-in-out infinite;
+}
+[data-pose="drag"] .buddy-leg {
+  transform: translateY(3px);
+}
+/* sprinting: leaning in, legs a blur, arms pumping, dust behind */
+[data-pose="run"] .buddy-body {
+  transform-origin: 50% 100%;
+  animation: buddy-run 0.26s ease-in-out infinite;
+}
+[data-pose="run"] .buddy-leg {
+  animation: buddy-stride 0.26s ease-in-out infinite;
+}
+[data-pose="run"] .buddy-leg-r {
+  animation-delay: -0.13s;
+}
+[data-pose="run"] .buddy-arm-l {
+  animation: buddy-pump 0.26s ease-in-out infinite;
+}
+[data-pose="run"] .buddy-arm-r {
+  animation: buddy-pump 0.26s ease-in-out -0.13s infinite;
+}
+[data-pose="run"] .buddy-dust {
+  opacity: 1;
+}
+[data-pose="run"] .buddy-dust circle {
+  transform-origin: 50% 50%;
+  animation: buddy-puff 0.52s ease-out infinite;
+}
+[data-pose="run"] .buddy-dust circle:nth-child(2) {
+  animation-delay: -0.17s;
+}
+[data-pose="run"] .buddy-dust circle:nth-child(3) {
+  animation-delay: -0.34s;
+}
+[data-pose="run"] .buddy-speed {
+  animation: buddy-speed 0.3s linear infinite;
+}
+[data-pose="run"] .buddy-shadow {
+  opacity: 0.1;
+}
+/* rolling along: a somersault, over and over */
+[data-pose="roll"] .buddy-body {
+  transform-origin: 50% 66%;
+  animation: buddy-roll 0.7s linear infinite;
+}
+[data-pose="roll"] .buddy-arm-l {
+  transform: rotate(60deg);
+}
+[data-pose="roll"] .buddy-arm-r {
+  transform: rotate(-60deg);
+}
+/* a bamboo break: holding a stalk up and munching */
+[data-pose="snack"] .buddy-bamboo {
+  opacity: 1;
+  transform-origin: 50% 100%;
+  animation: buddy-munch 0.5s ease-in-out infinite;
+}
+[data-pose="snack"] .buddy-arm-r {
+  transform: rotate(-125deg);
+}
+[data-pose="snack"] .buddy-head {
+  animation: buddy-chew 0.5s ease-in-out infinite;
+}
+/* dancing: swaying with arms up, then a little spin */
+[data-pose="dance"] .buddy-body {
+  transform-origin: 50% 100%;
+  animation: buddy-dance 1.2s ease-in-out infinite;
+}
+[data-pose="dance"] .buddy-arm-l {
+  animation: buddy-dance-arm 0.6s ease-in-out infinite;
+}
+[data-pose="dance"] .buddy-arm-r {
+  animation: buddy-dance-arm 0.6s ease-in-out -0.3s infinite;
+}
+/* stardust: floating up in a twinkle of stars */
+[data-pose="twinkle"] .buddy-body {
+  animation: buddy-float 2.4s ease-in-out infinite;
+}
+[data-pose="twinkle"] .buddy-sparkles {
+  transform-origin: 50% 50%;
+  animation: buddy-twinkle 1.2s ease-in-out infinite;
+}
+[data-pose="twinkle"] .buddy-arm-l {
+  transform: rotate(120deg);
+}
+[data-pose="twinkle"] .buddy-arm-r {
+  transform: rotate(-120deg);
+}
+[data-pose="drag"] .buddy-shadow {
+  opacity: 0.06;
+}
+/* cheering: jumps with both arms up */
+[data-pose="cheer"] .buddy-body {
+  animation: buddy-jump 0.55s ease-out 3;
+}
+[data-pose="cheer"] .buddy-arm-l {
+  transform: rotate(150deg);
+}
+[data-pose="cheer"] .buddy-arm-r {
+  transform: rotate(-150deg);
+}
+[data-pose="cheer"] .buddy-sparkles {
+  animation: buddy-sparkle 1.6s ease-out 1 forwards;
+}
+/* a happy hop (after being put down, or a good answer) */
+[data-pose="happy"] .buddy-body {
+  animation: buddy-jump 0.5s ease-out 1;
+}
+/* nodding along */
+[data-pose="nod"] .buddy-head {
+  animation: buddy-nod 0.55s ease-in-out 2;
+}
+/* waving hello */
+[data-pose="wave"] .buddy-arm-r {
+  animation: buddy-wave 0.45s ease-in-out 4;
+}
+/* asleep: slow breathing and z's */
+[data-pose="sleep"] .buddy-body {
+  animation: buddy-breathe 3.6s ease-in-out infinite;
+}
+[data-pose="sleep"] .buddy-head {
+  transform: rotate(-8deg);
+}
+[data-pose="sleep"] .buddy-zzz {
+  animation: buddy-zzz 3s ease-in-out infinite;
+}
+
+@keyframes buddy-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+@keyframes buddy-blink {
+  0%, 93%, 100% { transform: scaleY(1); }
+  96% { transform: scaleY(0.1); }
+}
+@keyframes buddy-waddle {
+  0%, 100% { transform: rotate(-4deg) translateY(0); }
+  50% { transform: rotate(4deg) translateY(-2px); }
+}
+@keyframes buddy-dangle {
+  0%, 100% { transform: rotate(-6deg); }
+  50% { transform: rotate(6deg); }
+}
+@keyframes buddy-jump {
+  0% { transform: translateY(0) scale(1, 1); }
+  20% { transform: translateY(0) scale(1.06, 0.92); }
+  50% { transform: translateY(-14px) scale(0.96, 1.05); }
+  80% { transform: translateY(0) scale(1.04, 0.95); }
+  100% { transform: translateY(0) scale(1, 1); }
+}
+@keyframes buddy-nod {
+  0%, 100% { transform: rotate(0); }
+  50% { transform: rotate(8deg) translateY(1px); }
+}
+@keyframes buddy-wave {
+  0%, 100% { transform: rotate(-150deg); }
+  50% { transform: rotate(-115deg); }
+}
+@keyframes buddy-breathe {
+  0%, 100% { transform: scale(1, 1); }
+  50% { transform: scale(1.03, 0.97); }
+}
+@keyframes buddy-sparkle {
+  0% { opacity: 0; transform: scale(0.4); }
+  30% { opacity: 1; transform: scale(1.1); }
+  100% { opacity: 0; transform: scale(1) translateY(-6px); }
+}
+@keyframes buddy-zzz {
+  0% { opacity: 0; transform: translate(0, 4px); }
+  40% { opacity: 0.8; }
+  100% { opacity: 0; transform: translate(4px, -8px); }
+}
+@keyframes buddy-swing {
+  0%, 100% { transform: rotate(0); }
+  50% { transform: rotate(6deg); }
+}
+@keyframes buddy-run {
+  0%, 100% { transform: rotate(10deg) translateY(0); }
+  50% { transform: rotate(10deg) translateY(-5px); }
+}
+@keyframes buddy-stride {
+  0%, 100% { transform: translate(-5px, 0) rotate(-12deg); }
+  50% { transform: translate(5px, -5px) rotate(14deg); }
+}
+@keyframes buddy-pump {
+  0%, 100% { transform: rotate(55deg); }
+  50% { transform: rotate(-35deg); }
+}
+@keyframes buddy-puff {
+  0% { opacity: 0.9; transform: translate(6px, 0) scale(0.5); }
+  100% { opacity: 0; transform: translate(-10px, -6px) scale(1.4); }
+}
+@keyframes buddy-speed {
+  0% { opacity: 0.6; transform: translateX(6px); }
+  100% { opacity: 0; transform: translateX(-10px); }
+}
+@keyframes buddy-roll {
+  from { transform: rotate(0); }
+  to { transform: rotate(360deg); }
+}
+@keyframes buddy-munch {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(2px) rotate(-3deg); }
+}
+@keyframes buddy-chew {
+  0%, 100% { transform: rotate(0); }
+  50% { transform: rotate(-3deg) translateY(1px); }
+}
+@keyframes buddy-dance {
+  0%, 100% { transform: rotate(-9deg) translateY(0); }
+  25% { transform: rotate(0) translateY(-6px); }
+  50% { transform: rotate(9deg) translateY(0); }
+  75% { transform: rotate(0) translateY(-6px) scaleX(-1); }
+}
+@keyframes buddy-dance-arm {
+  0%, 100% { transform: rotate(150deg); }
+  50% { transform: rotate(100deg); }
+}
+@keyframes buddy-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+@keyframes buddy-twinkle {
+  0%, 100% { opacity: 0.25; transform: scale(0.8) rotate(0); }
+  50% { opacity: 1; transform: scale(1.1) rotate(12deg); }
+}
+@keyframes buddy-glow {
+  0%, 100% { opacity: 0.22; transform: scale(0.94); }
+  50% { opacity: 0.4; transform: scale(1.04); }
+}
+@keyframes buddy-glint {
+  0%, 70%, 100% { opacity: 0; }
+  80% { opacity: 0.9; }
+}
+
+/* a super rare badge: a slow shine across it */
+.buddy-shimmer {
+  background-image: linear-gradient(110deg, transparent 35%, rgb(255 255 255 / 0.75) 50%, transparent 65%);
+  background-size: 250% 100%;
+  animation: buddy-shine 2.8s ease-in-out infinite;
+}
+@keyframes buddy-shine {
+  0% { background-position: 120% 0; }
+  60%, 100% { background-position: -120% 0; }
+}
+
+/* what a buddy says */
+.buddy-bubble {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  translate: -50% 0;
+  width: max-content;
+  max-width: 220px;
+  padding: 7px 11px;
+  border-radius: 12px;
+  background: var(--color-card);
+  color: var(--color-foreground);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-float);
+  font-size: 13px;
+  line-height: 1.35;
+  font-weight: 600;
+  pointer-events: none;
+  animation: buddy-pop 0.22s ease-out;
+}
+.buddy-bubble::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  translate: -50% -50%;
+  rotate: 45deg;
+  width: 10px;
+  height: 10px;
+  background: var(--color-card);
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+.buddy-bubble[data-align="end"] {
+  left: auto;
+  right: -6px;
+  translate: 0 0;
+}
+.buddy-bubble[data-align="end"]::after {
+  left: auto;
+  right: 26px;
+  translate: 50% -50%;
+}
+.buddy-bubble[data-align="start"] {
+  left: -6px;
+  translate: 0 0;
+}
+.buddy-bubble[data-align="start"]::after {
+  left: 26px;
+}
+.buddy-bubble[data-side="below"] {
+  bottom: auto;
+  top: calc(100% + 8px);
+}
+.buddy-bubble[data-side="below"]::after {
+  top: 0;
+  rotate: 225deg;
+}
+@keyframes buddy-pop {
+  from { opacity: 0; transform: translateY(4px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+/* pandas out on a drawing (canvas-buddies.tsx): a layer in the drawing's coordinates, inside the
+ * board, under its tool bars, zooming with the drawing like anything drawn. Each panda's box is placed
+ * at its feet; .buddy-unfit keeps words the same size on screen. Moves bring their own transition. */
+.buddy-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: 5;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+.buddy-world .buddy {
+  transition: none;
+}
+.buddy-world .buddy:focus-visible {
+  outline: none;
+}
+.buddy-world .buddy:focus-visible .buddy-fit {
+  outline: 3px solid var(--color-ring);
+  outline-offset: 2px;
+  border-radius: 18px;
+}
+.buddy-fit {
+  position: absolute;
+  inset: 0;
+}
+.buddy-unfit {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform: scale(var(--buddy-unfit, 1));
+  transform-origin: 0 0;
+}
+.buddy-unfit[data-at="feet"] {
+  top: 100%;
+}
+.buddy-unfit .buddy-bubble[data-align="end"] {
+  right: -26px;
+}
+.buddy-unfit .buddy-bubble[data-align="start"] {
+  left: -26px;
+}
+
+/* a wild panda on a drawing: fades in, a bobbing "!" over its head, a hint on hover */
+.buddy-wild {
+  animation: buddy-wild-in 0.6s ease-out;
+}
+.buddy-wild[data-fading] {
+  opacity: 0;
+  transition: opacity 0.5s ease-in;
+}
+.buddy-alert {
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  margin-left: -11px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 2px solid #fff;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  pointer-events: none;
+  box-shadow: 0 1px 3px rgb(32 31 36 / 0.25);
+  animation: buddy-alert 1.4s ease-in-out infinite;
+}
+.buddy-tip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  translate: -50% 0;
+  width: max-content;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--color-grey-900);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+}
+.buddy-wild:hover .buddy-tip,
+.buddy-wild:focus-visible .buddy-tip {
+  opacity: 1;
+}
+@keyframes buddy-wild-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes buddy-alert {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .buddy {
+    transition: none;
+  }
+  .buddy-svg *,
+  .buddy-bubble,
+  .buddy-alert,
+  .buddy-wild,
+  .buddy-shimmer {
+    animation: none !important;
+  }
+}
+
+/* ------------------------------------------------------------ seasonal themes (src/components/seasonal) */
+
+/* Bats cross their container now and then: over in the first 60%, then out of sight. */
+@keyframes season-bat-cross {
+  0% { left: -12%; transform: translateY(0); }
+  20% { transform: translateY(-18px); }
+  40% { transform: translateY(14px); }
+  60%, 100% { left: 108%; transform: translateY(-6px); }
+}
+@keyframes season-flap {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.35); }
+}
+@keyframes season-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(12px); }
+}
+.season-bat {
+  position: absolute;
+  left: -12%;
+  animation: season-bat-cross var(--dur, 16s) linear var(--delay, 0s) infinite both;
+}
+.season-bat > svg {
+  animation: season-flap 0.3s ease-in-out infinite;
+  transform-origin: 50% 60%;
+}
+.season-bob {
+  animation: season-bob 3.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .season-bat,
+  .season-bat > svg,
+  .season-bob {
+    animation: none;
+  }
+}
+
+/* The menu's active tab gets a striped edge in the season's colours. */
+[data-season="christmas"] a[aria-current="page"] {
+  border-image: repeating-linear-gradient(45deg, #d63b30 0 5px, #ffffff 5px 10px) 1;
+}
+[data-season="halloween"] a[aria-current="page"] {
+  border-image: repeating-linear-gradient(45deg, #ef8433 0 5px, #2b2133 5px 10px) 1;
+}
+[data-season="easter"] a[aria-current="page"] {
+  border-image: repeating-linear-gradient(45deg, #f6b8c8 0 5px, #fbe29a 5px 10px, #a9d4f2 10px 15px, #b9e3b5 15px 20px) 1;
+}
+
+/* ------------------------------------------------------------ component kit (src/components/kit) */
+
+/* Popovers, menus, tooltips and dialogs grow in from where they open; Radix
+   waits for a closing animation before removing them. */
+@keyframes kit-pop-in {
+  from { opacity: 0; scale: 0.96; }
+}
+@keyframes kit-pop-out {
+  to { opacity: 0; scale: 0.96; }
+}
+@keyframes kit-fade-in {
+  from { opacity: 0; }
+}
+@keyframes kit-fade-out {
+  to { opacity: 0; }
+}
+@keyframes kit-slide-in-right {
+  from { translate: 100% 0; }
+}
+@keyframes kit-slide-out-right {
+  to { translate: 100% 0; }
+}
+@keyframes kit-slide-in-left {
+  from { translate: -100% 0; }
+}
+@keyframes kit-slide-out-left {
+  to { translate: -100% 0; }
+}
+@keyframes kit-toast-in {
+  from { opacity: 0; translate: 0 12px; }
+}
+@keyframes kit-shimmer {
+  from { background-position: 150% 0; }
+  to { background-position: -50% 0; }
+}
+.kit-pop {
+  transform-origin: var(--radix-popper-transform-origin, center);
+}
+.kit-pop[data-state="open"],
+.kit-pop[data-state="delayed-open"],
+.kit-pop[data-state="instant-open"] {
+  animation: kit-pop-in 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.kit-pop[data-state="closed"] {
+  animation: kit-pop-out 100ms ease-in forwards;
+}
+/* Menus and tooltips go at once when they close, so the next key press
+   (Escape for the dialog underneath, say) reaches what's still on screen. */
+.kit-pop.kit-instant-out[data-state="closed"] {
+  animation: none;
+}
+.kit-fade[data-state="open"] {
+  animation: kit-fade-in 160ms ease-out;
+}
+.kit-fade[data-state="closed"] {
+  animation: kit-fade-out 120ms ease-in forwards;
+}
+.kit-slide-right[data-state="open"] {
+  animation: kit-slide-in-right 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.kit-slide-right[data-state="closed"] {
+  animation: kit-slide-out-right 180ms ease-in forwards;
+}
+.kit-slide-left[data-state="open"] {
+  animation: kit-slide-in-left 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.kit-slide-left[data-state="closed"] {
+  animation: kit-slide-out-left 180ms ease-in forwards;
+}
+.kit-toast {
+  animation: kit-toast-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.kit-shimmer {
+  background-image: linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 0.55) 50%, transparent 100%);
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: kit-shimmer 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kit-pop,
+  .kit-fade,
+  .kit-slide-right,
+  .kit-slide-left,
+  .kit-toast,
+  .kit-shimmer {
+    animation: none !important;
+  }
+}
+
+/* Sliders: a native range input, so the keyboard and screen readers already
+   know it. A thin beige track, filled up to the value, with a white knob. */
+.kit-range {
+  --kit-range-fill: var(--color-grey-900);
+  --kit-range-track: #e7e0d9;
+  appearance: none;
+  height: 20px;
+  background: transparent;
+  cursor: pointer;
+}
+.kit-range[data-tone="light"] {
+  --kit-range-fill: #ffffff;
+  --kit-range-track: rgb(255 255 255 / 0.25);
+}
+.kit-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.kit-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--kit-range-fill) var(--fill, 0%), var(--kit-range-track) var(--fill, 0%));
+}
+.kit-range::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--kit-range-track);
+}
+.kit-range::-moz-range-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--kit-range-fill);
+}
+.kit-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -6px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 2px solid var(--color-grey-900);
+  box-shadow: 0 1px 3px rgb(32 31 36 / 0.25);
+  transition: box-shadow 120ms;
+}
+.kit-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 2px solid var(--color-grey-900);
+  box-shadow: 0 1px 3px rgb(32 31 36 / 0.25);
+}
+.kit-range:focus-visible {
+  outline: none;
+}
+.kit-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px rgb(39 124 120 / 0.35);
+}
+.kit-range:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 4px rgb(39 124 120 / 0.35);
 }
