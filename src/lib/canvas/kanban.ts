@@ -1,4 +1,4 @@
-import type { KanbanCard, KanbanColumn, KanbanElement } from "./schema";
+import type { CanvasElement, KanbanCard, KanbanColumn, KanbanElement } from "./schema";
 
 /**
  * To-do boards: layout, hit-testing and the card moves behind drag and drop.
@@ -347,4 +347,29 @@ export function newKanban(opts: { id: string; x: number; y: number; scale: numbe
       { id: opts.ids(), title: "Done", color: COLUMN_COLORS[2], cards: [] },
     ],
   };
+}
+
+/**
+ * Cards that were on a board before and are now in a board's last column
+ * without having been there: tasks just finished. Cards added straight to
+ * Done, or copied there with a board, don't count.
+ */
+export function finishedCards(before: readonly CanvasElement[], after: readonly CanvasElement[]): string[] {
+  const existed = new Set<string>();
+  const doneBefore = new Set<string>();
+  for (const el of before) {
+    if (el.type !== "kanban") continue;
+    el.columns.forEach((c, i) => {
+      for (const k of c.cards) {
+        existed.add(k.id);
+        if (el.columns.length > 1 && i === el.columns.length - 1) doneBefore.add(k.id);
+      }
+    });
+  }
+  const out: string[] = [];
+  for (const el of after) {
+    if (el.type !== "kanban" || el.columns.length < 2) continue;
+    for (const k of el.columns[el.columns.length - 1].cards) if (existed.has(k.id) && !doneBefore.has(k.id)) out.push(k.id);
+  }
+  return out;
 }

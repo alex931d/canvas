@@ -7,6 +7,7 @@ import { db } from "@/db";
 import { flashcards } from "@/db/schema";
 import { getCurrentSession } from "@/lib/auth/session";
 import { getMembership } from "@/lib/billing/membership";
+import { recordEvents } from "@/lib/buddy/progress";
 import { schedule, type Grade } from "@/lib/study/schedule";
 
 /*
@@ -48,6 +49,8 @@ export async function reviewCard(id: string, grade: Grade): Promise<Result<{ box
       lastReviewedAt: new Date(),
     })
     .where(and(eq(flashcards.id, id), eq(flashcards.userId, user.id)));
+  // For the study buddies: one more card answered today.
+  await recordEvents(db, user.id, [{ kind: "review" }]);
   return { ok: true, box: next.box, dueAt: next.dueAt.toISOString() };
 }
 

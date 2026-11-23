@@ -13,6 +13,12 @@ animation, and its own component kit (with Radix underneath for menus and dialog
 - **Screenshots, GIFs and videos**: paste (Ctrl/⌘+V), drag and drop, or use the **Image or video**
   button. Large images are scaled down; GIFs keep animating; MP4, WebM and QuickTime clips up to 50 MB
   play right on the canvas (see [To-do boards, GIFs and videos](#to-do-boards-gifs-and-videos)).
+- **Study buddies**: small animated pandas that float over the app, follow your progress (cards
+  answered, to-do cards done, your streak and level) and cheer you on. Each has a trick (a sprint across
+  the screen, a roll, a nap, a dance…), they can climb onto the canvas and walk about on your drawings
+  (panning and zooming with them) if you let them, and from your first day (level 1) wild pandas
+  (common, uncommon, rare and super rare) wander onto drawings to battle and catch for good (see
+  [Study buddies](#study-buddies)). Your study level is kept on your account (`users.level`).
 - **To-do boards**: To do, Doing and Done columns of cards on the canvas, next to your notes. Drag cards
   between columns and between boards.
 - **Select, move, resize, duplicate, delete**, copy and paste, undo and redo.
@@ -63,7 +69,7 @@ animation, and its own component kit (with Radix underneath for menus and dialog
 docker compose up -d --wait       # Postgres 17 on localhost:5432; returns once it's ready
 cp .env.example .env.local        # database URL + AI settings
 npm install
-npm run db:migrate                # users, sessions, drawings, assets, subscriptions, sharing, flashcards, email codes, roles, settings
+npm run db:migrate                # users, sessions, drawings, assets, subscriptions, sharing, flashcards, buddies, email codes, roles, settings
 npm run dev                       # http://localhost:3000, then create an account
 npm run membership -- grant you@example.com   # free membership for your own account
 npm run role -- set you@example.com admin     # and the admin dashboard at /admin
@@ -152,7 +158,7 @@ auth yourself. This app follows that guide, with no auth library: about 400 line
 
 | Table | Columns | Notes |
 | --- | --- | --- |
-| `users` | `id`, `name`, `email`, `password_hash`, `email_verified`, `role`, `created_at` | Unique index on `lower(email)`. `password_hash` is Argon2id (`m=19456, t=2, p=1`). `role` is `user`, `support` or `admin`. |
+| `users` | `id`, `name`, `email`, `password_hash`, `email_verified`, `role`, `level`, `created_at` | Unique index on `lower(email)`. `password_hash` is Argon2id (`m=19456, t=2, p=1`). `role` is `user`, `support` or `admin`. `level` is the study level (at least 1; see [Study buddies](#study-buddies)) |
 | `sessions` | `id`, `secret_hash`, `user_id`, `created_at`, `last_verified_at` | `secret_hash` is SHA-256 of the secret (32 bytes). Deleted with the user |
 | `email_verification_codes` | `user_id`, `email`, `code_hash`, `attempts`, `sent_at`, `expires_at` | One per account; `code_hash` is SHA-256 of the 8-digit code |
 | `password_reset_tokens` | `token_hash`, `user_id`, `email`, `created_at`, `expires_at` | `token_hash` is SHA-256 of the link's token |
@@ -358,7 +364,7 @@ allow:
 | Give and end complimentary memberships | | ✓ | ✓ |
 | Change email addresses | | | ✓ |
 | Change roles, and edit staff (support and admin) accounts | | | ✓ |
-| Site settings: the seasonal theme | | | ✓ |
+| Site settings: the seasonal theme, and how wild pandas turn up and battle | | | ✓ |
 
 Nobody can change their own role, so there's always at least one admin.
 
@@ -390,7 +396,22 @@ dashboard** in the account menu; for everyone else `/admin` is the 404 page.
 - **Edit** opens the account in a side panel: name, email, role (with what it allows), email confirmed,
   complimentary membership, **Sign out everywhere**, **Email a password reset link**, and the
   account's history. Paid memberships are refunded or cancelled in the Stripe Dashboard.
-
+- **Wild pandas** (admins only; `src/components/admin/wild-rules-form.tsx`): how wild pandas turn up
+  for everyone. See [Wild pandas and battles](#wild-pandas-and-battles) for what each number does.
+  - A switch for whether they turn up at all. Off stops new ones; any already out stay their time,
+    and battles finish.
+  - The chance each time (1–100 %), the minutes between chances (1–240), and the minutes each one
+    stays (1–30).
+  - For each kind: how often (0–1,000, against the other kinds someone can meet; 0 is never), from
+    which study level (1–10), how many levels above the member (−3 to +5), the chance bamboo is taken
+    at its last breath (1–100 %), and the chance it runs off each turn (0–50 %).
+  - As you type, it shows how often that works out ("about one every 6½ minutes, staying 3 minutes"),
+    each kind's share at the top level, and the lowest level that meets any.
+  - **Save wild pandas** stores the rules in `site_settings` under `wild_pandas`, and they apply to
+    the next wild panda anywhere. **Reset to defaults** puts back the numbers in the table under Wild
+    pandas and battles. The server checks every number again (`rulesFromForm` in
+    `src/lib/buddy/rules.ts`), and a stored value that's missing or out of range falls back to its
+    default by itself.
 
 **Checks and history**
 
@@ -530,13 +551,175 @@ Easy) and comes back after 1, 3, 7, 16, 35, 75 or 160 days; a forgotten one drop
 back in 10 minutes, and again later in the same session. Cards can be edited, started over or deleted
 below the session, and filtered by deck. The gallery shows how many are due.
 
-## Study buddies (on the `dev` branch)
+## Study buddies
 
-The study buddies (animated pandas that follow your progress, walk on your drawings, and wild pandas to
-battle and catch, with admin controls for how they turn up) live on the `dev` branch. Their database
-tables and migrations (`0006_study_buddies`, `0011_buddy_battles`, `0012_user_level`) stay here too,
-unused, so both branches share one migration history and one database: run `dev` against the same
-database at any time, and merging it into `main` later brings them back with nothing to migrate.
+Members get a panda, **Bao**, floating near the bottom-right corner of the gallery, `/study` and every
+drawing. It's original SVG with CSS animation (`src/components/buddy/panda.tsx`, `.buddy-*` in
+`globals.css`): it bobs and blinks, drifts about near its spot, dangles while you drag it, waves hello
+once a day, naps after three quiet minutes and wakes when you're back.
+
+- **Move it**: drag it anywhere, or focus it (Tab) and use the arrow keys (Shift for bigger steps). The
+  spot is saved as a fraction of the window, so it follows you to other screen sizes and devices.
+- **Click it** for today's progress: cards answered against your daily goal, to-do cards finished, the
+  streak, the level and your bamboo, plus its rarity and trick (**Show me** does the trick now), with
+  **Hide buddies** (undo in the toast), **Settings** and a link to all your buddies.
+- **Settings** (also in the account menu, which is how hidden buddies come back; on pages without
+  buddies the menu opens `/buddies` instead): show or hide, let them wander or stay put, **Walk all
+  over drawings** (off by default; needs wandering), **Do their tricks** (on), **Wild pandas on
+  drawings** (on), the daily goal (flashcards a day; 0 turns it off), and up to three buddies with
+  their own names and scarf colours, made up or caught. The same switches are on the Settings page.
+- **Following progress**: a flashcard answered is 1 point and a to-do card moved into a board's last
+  column is 5 (once per card, and only for cards that were on a board before, so copying a finished
+  board doesn't count). Points make levels (20, 50, 100, 175, …, 1,000), and levels dress the pandas
+  up: a scarf at 2, reading glasses at 4 and a graduation cap at 6. The streak counts days in a row
+  with anything studied, in your own time zone.
+- **Your level, on your record**: the level is stored on the account (`users.level`, 1 for a new
+  account; migration `0012_user_level.sql` worked it out for everyone who had studied already). Noting
+  something studied works it out again in the same transaction (`recordEvents` → `syncLevel` in
+  `src/lib/buddy/progress.ts`, in SQL from the same points and level floors), and reading progress
+  (`GET /api/buddy`) puts it right if study events got in some other way. Everything that needs only
+  the level reads it from there: the session's user (`user.level`), wild pandas and battles,
+  `/buddies`, and the admin panel ("Study level 4.").
+- **Reacting**: a hop for a good answer, a nod for a missed one, and a few words now and then (the
+  first card, every fifth, the daily goal, the end of a round, a level, a finished task), never on
+  every card. With *reduce motion* on, they don't drift or bounce; they still talk.
+
+Events are recorded on the server where they happen: `reviewCard` notes each answer, and the changes
+route notes to-do cards that reached Done (`finishedCards` in `src/lib/canvas/kanban.ts`). The page
+tells the buddies through a window event (`src/lib/buddy/events.ts`), so nothing else depends on them.
+
+### Tricks and getting about
+
+Every panda has a trick, which is also its special move in a battle. Pandas you make yourself are
+common, with a trick that follows from their id (Bao always sprints); caught ones keep theirs.
+
+| Trick | On screen | In a battle |
+| --- | --- | --- |
+| Sprint | Runs (dust and speed lines) to the other side of the screen, or of the drawing when roaming, then walks back | **Dash**: a quick hit that always goes first |
+| Roll | Somersaults a few steps towards the side with more room | **Roll**: hits hard, misses now and then |
+| Power nap | Curls up for a nap | **Nap**: almost half its energy back |
+| Bamboo break | Stops for a bamboo snack | **Snack**: a quarter of its energy back, and stronger hits |
+| Pep talk | Jumps up and cheers | **Cheer**: much stronger hits |
+| Dance | A little spinning dance | **Dizzy dance**: the other panda misses more |
+| Stardust | Floats up in a twinkle of stars | **Starfall**: a big hit that never misses |
+
+- With **Do their tricks** on, each panda does its trick every 30–60 s, unless it's asleep, being
+  dragged or showing its card. Tricks that move it (sprint, roll) need **Let them wander about**;
+  **Show me** on the card does the trick whatever the settings, and a panda that doesn't wander walks
+  back to exactly its spot afterwards.
+- Each move is a CSS transform transition whose length follows the distance
+  (`src/components/buddy/movement.ts`): a stroll near its spot takes 3.2 s, walking goes at about 55 px/s
+  (1.6–9 s), a sprint at about 650 px/s and a roll at about 180 px/s, with the pose to match (`data-pose`
+  `walk`, `run` or `roll`).
+- **Walk on drawings**: on a drawing the pandas leave the corner and climb onto the canvas itself
+  (`src/components/buddy/canvas-buddies.tsx`), as part of the drawing. They're placed in its own
+  coordinates, inside the board (marked `data-buddy-stage`), so they move with it when you scroll or pan,
+  are exactly as much bigger or smaller as everything else when you zoom (a panda is 64×72 drawing
+  units, like a shape that size), are clipped to it and walk under its tool bars. Only their words stay
+  the same size on screen, so they can be read. The board publishes its camera on every change
+  (`src/lib/canvas/view-bus.ts`) and the layer follows it in the same frame, without re-rendering.
+  Nothing they do depends on where you're looking: each has its own patch of the drawing (the part in
+  view when it first climbed on, between 700×450 and 1600×1000 drawing units) and walks (and sprints,
+  and rolls) about that, resting in between, wherever you pan or zoom. Put one down somewhere else and
+  its patch moves there. Each panda's spot and patch are kept for each drawing in this browser
+  (`localStorage` `buddy-spots:<drawing id>`), so it's where you left it next time. Turned off, they go
+  back to their corner.
+- **They keep off what's drawn** (`src/lib/buddy/pathing.ts`). The board also publishes its elements;
+  shapes, text, pictures, equations, graphs and to-do boards count as their whole box, while pen
+  strokes and lines are cut into short pieces, so the empty middle of a circle you drew stays walkable
+  (rubbed-out ink still counts). Before each walk a grid of spots 22 drawing units apart is laid over
+  the panda's patch, and a spot is blocked if the panda's body standing there would come within 6 units
+  of anything (all in drawing units, so zooming changes nothing). They only choose clear spots, and walk there along a path found round everything
+  (A*, no squeezing diagonally between two blocked spots), straightened so it only turns where it has to
+  and walked at an even pace. Each turn waits until the move before it has really finished (its
+  `transitionend`, not a timer), so a busy page can't make a panda cut a corner across something drawn.
+  Sprints go round too, a roll only happens where the way is clear (else it
+  rolls on the spot), and wild pandas walk in and out at clear spots on the edge of their patch. If you draw
+  under a panda it steps aside to the nearest clear spot; if you draw across its way, it finds another
+  way (or another spot); if you put one down on your drawing, it hops off. With no clear paper on its
+  patch a panda stays where it is.
+- A panda never looks like it's resting while it moves: on the move it shows its walk, run or roll,
+  and a nap, a snack, a dance, a reaction or falling asleep stops it where it is first (as does pressing
+  it). A panda that's saying something stands still until it's done.
+- With *reduce motion* on, nothing moves by itself (pandas on a drawing still pan and zoom with it) and
+  **Show me** shows the trick's pose on the spot.
+
+### Wild pandas and battles
+
+From level 1 (so from your first day), while a drawing is open, the page asks `POST /api/buddy/wild` 2.5 s after it opens and
+then every minute (not while the tab is hidden). The server decides: at most one chance every 4 minutes,
+counted from when the last one turned up or left (so the first comes after a full wait and none
+straight after a battle), each a 60 % coin flip. A wild panda stays 3 minutes on the canvas itself
+(like buddies walking on drawings, whatever that setting), on a patch of the drawing that's the part in
+view when it turns up: it walks in from one side, ambles about with a bobbing "!" over its head (a
+sprinter dashes now and then, a roller rolls), and walks off the nearer side when its time is up,
+staying put on the drawing however you pan or zoom. One of your buddies points it out.
+
+These numbers, and the ones in the table, are the defaults: admins can change them all for everyone
+in `/admin` under **Wild pandas**, or switch wild pandas off (see
+[Roles and the admin dashboard](#roles-and-the-admin-dashboard)). The rules live in
+`src/lib/buddy/rules.ts` and are read on every request (`getWildRules`). A battle keeps the bamboo
+and running-off chances it started with (`BattleState.rates`). Browsers learn whether wild pandas
+turn up, and from which level each kind does, from `GET /api/buddy` (`wild`). The field guide on
+`/buddies`, the level-up lines and the settings switch's hint follow along.
+
+| Rarity | Coat | From level | How often | Bamboo taken at its last breath | Strength | Runs off |
+| --- | --- | --- | --- | --- | --- | --- |
+| Common | Classic | 1 | 58 | 75 % | ×1 | never |
+| Uncommon | Cocoa (brown) | 3 | 28 | 55 % | ×1.1 | 3 % a turn |
+| Rare | Moonlit (navy, with a crescent) | 5 | 11 | 38 % | ×1.22, a level above you | 6 % a turn |
+| Super rare | Golden (with a star and a glow) | 7 | 3 | 22 % | ×1.38, two levels above you | 10 % a turn |
+
+"How often" weighs the rarities your level can meet (at level 4: common 58 out of 86). Wild pandas
+are your level, give or take one, plus the rarity's bonus.
+
+**The battle** is turn based and original to canvas (its own art, moves and rules; no names or
+pictures from any game). Press the wild panda and it opens: the wild panda faces you on its patch of
+grass, your buddy stands with its back to you, each with an energy bar on a taped-down card, and what
+happens is written underneath in handwriting. Your choices:
+
+- **Fight**: **Bump** (always lands), **Paw swipe** (stronger, misses one time in ten), **Stare** (its
+  hits get softer), or the buddy's own trick move. The faster panda goes first; Dash always does.
+  Hits are stronger with your level, a rarer coat and Cheer or Snack; one in sixteen is a great hit.
+- **Bamboo**: offer some, showing what you have left and the chance now. The chance is the rarity's
+  rate, less the more energy the panda has left (down to 30 % of it at full energy), and a little
+  better or worse for each level between you; it nibbles three times and each nibble has to go well.
+  If it doesn't take it, it gets a turn.
+- **Buddies**: send out another of the buddies with you (it costs your turn, except when the one out
+  is worn out). If they're all worn out, the wild panda wanders off.
+- **Run**: always works. Closing the battle part-way is running too.
+
+Wear a wild panda out completely and it wanders off for a rest (a win, but not a catch). Rarer ones may
+run off into the bamboo from your second turn on. Steps play one after another with
+[Motion](https://motion.dev) (lunges, shakes, floating numbers, the bamboo thrown in an arc, wobbles, a
+burst of hearts); press the message to skip ahead (Enter works too). *Reduce motion* keeps the words
+and drops the movement.
+
+**Bamboo** comes from studying: 5 to start with and one more for every 10 points. **Caught pandas**
+are yours for good (`buddy_collection`): one walks with you straight away if fewer than three are out,
+otherwise it waits at home. `/buddies` (also in the sidebar) shows who's out, every panda you've
+caught with its trick, battle move and the day you caught it (each with an **Out with you** switch,
+three at a time), a field guide to the four coats and the levels they turn up from, how catching
+works, and your bamboo.
+
+**Every turn is played on the server.** The engine (`src/lib/buddy/battle.ts`) is pure, with the
+randomness passed in, so the unit checks replay battles exactly; `src/lib/buddy/wild.ts` keeps the
+battle in `buddy_encounters.state`, works out your bamboo from your study points each turn, and saves
+the turn only if nobody else played it first (the request carries the turn it was played on). The
+browser just animates the steps it gets back (`src/components/buddy/battle-screen.tsx`), so a battle
+can't be won, or bamboo conjured, from the console.
+
+| Request | Answer |
+| --- | --- |
+| `GET /api/buddy?tz=` | settings, progress, first name, caught pandas, bamboo, and `wild` (whether wild pandas turn up, how long they stay, and the level each kind turns up from, or null for never) |
+| `PUT /api/buddy` | saves settings; caught pandas in the party must be yours, each once (422) |
+| `POST /api/buddy/wild` | the wild panda around now (wandering, or mid-battle), maybe a new one, or `null` |
+| `POST /api/buddy/battle` | `{ id, action: "start", first? }` or `{ id, turn, action }`, where `action` is a move (`bump`, `swipe`, `stare`, `special`), `bamboo`, a switch `{ to }` or `run`; answers `{ battle, steps, bamboo, caught }` |
+
+Errors: 401 signed out, 402 without a membership, 404 a panda that isn't yours, 409 a battle already
+started or a turn already played, 410 one that has wandered off (or a battle that's over or not started),
+422 a move that isn't allowed (out of bamboo, a buddy that can't come out), 429 too many requests
+(20 looks then one every 10 s; 120 turns then two a second).
 
 ## Settings, profile pictures and effects
 
@@ -580,6 +763,10 @@ deleted and undone things leave the same way.
   board reads them as it paints and `drawElementFx` in `render.ts` draws an element part-way.
 
 **To-do board effects** (`src/lib/canvas/kanban-fx.ts`): see [To-do boards](#to-do-boards-gifs-and-videos).
+
+**Study buddies** (members): show them, let them wander, walk on drawings, do their tricks, and
+wild pandas on drawings, saved as soon as they change (`PUT /api/buddy`). Names, scarves and caught
+pandas are on `/buddies`. See [Study buddies](#study-buddies).
 
 Both choices are saved per person in `user_preferences` as soon as they change, and follow you to
 every device. On a device set to **reduce motion**, canvas leaves them off (the settings page says so),
@@ -626,7 +813,8 @@ src/
     admin/page.tsx               admin dashboard: totals, search, role filter, ← 1 2 3 4 5 → pager, edit panel
     admin/actions.ts             staff actions: save details and role, complimentary memberships, sign out, reset link,
                                  remove a profile picture, the seasonal theme
-    settings/                    name, profile picture and effects; actions.ts saves them
+    settings/                    name, profile picture, effects and study buddy switches; actions.ts saves them
+    buddies/page.tsx             your buddies: who's out, the pandas you've caught, the field guide
     api/site/theme               GET the seasonal theme mode (public, cached a minute)
     api/stripe/webhook           Stripe webhooks: keeps memberships in step with Stripe
     page.tsx                     gallery: your drawings, shared with you, flashcards due
@@ -644,12 +832,23 @@ src/
     api/assets/[id]              GET it (cached forever; ids never change), with byte ranges
     api/flashcards               POST a card (multipart, with an optional picture); [id]/image serves it
     api/check-math               POST a selection image -> verdict JSON
+    api/buddy                    GET study buddy settings, progress (?tz=), caught pandas, bamboo; PUT settings
+    api/buddy/wild               POST: is a wild panda around? (the server decides)
+    api/buddy/battle             POST: start a battle or play a turn (played on the server)
     api/avatars/[userId]         GET a profile picture (signed in; cached privately per version)
   components/
     app-sidebar.tsx              dark sidebar (tools in the editor), collapsible, bottom bar on phones
-    user-menu.tsx                avatar + account menu (Settings, Membership, Sign out)
+    user-menu.tsx                avatar + account menu (Study buddies, Settings, Membership, Sign out)
     motion/                      Reveal (slide in and out on scroll) and MotionProvider (reduced motion)
     settings/                    profile (picture and name) and effects, with their live examples
+    buddy/panda.tsx              the panda: SVG with poses, coats, accessories and a back view
+    buddy/study-buddies.tsx      floating buddies: wander, roam, tricks, drag, speech, progress card, settings,
+                                 looking for wild pandas
+    buddy/movement.ts            how pandas get about (durations by distance, room on the drawing, tricks)
+    buddy/canvas-buddies.tsx     pandas on the canvas (yours and wild ones), in the drawing's coordinates
+    buddy/battle-screen.tsx      the battle (Motion animations of the steps the server sends)
+    buddy/collection.tsx         the /buddies page: party, collection, field guide
+    buddy/rarity-badge.tsx       Common, Uncommon, Rare, Super rare
     auth/auth-form.tsx           login and sign-up forms
     auth/account-forms.tsx       confirm-email, forgot-password and new-password forms
     auth/captcha.tsx             the Turnstile widget hook (waits for the check, fresh token per try)
@@ -688,7 +887,7 @@ src/
     auth/rate-limit.ts           token buckets and the per-account login throttle
     auth/roles.ts                roles, what each may do (can, canManage), shared by pages and server
     seasons.ts                   seasonal themes: dates (Easter computed per year) and what each one shows
-    site/settings.ts             site-wide settings (the seasonal theme)
+    site/settings.ts             site-wide settings (the seasonal theme, the wild pandas' rules)
     admin/query.ts               the dashboard's URL state: parse, build links, the five-page window
     admin/users.ts               dashboard queries (search, totals, account details) and the audit log
     email/send.ts                SMTP via nodemailer, or the console when SMTP_URL isn't set
@@ -708,6 +907,12 @@ src/
     preferences.ts               the settings page's choices: types, defaults, parsing
     profile/                     profile pictures (URLs, type sniffing; storing and serving) and names
     canvas/geometry.ts           bounds, hit-testing, lasso, move/resize
+    canvas/view-bus.ts           the open drawing's camera and elements, for pandas walking on it
+    buddy/kinds.ts               rarities, coats, tricks, bamboo, wild pandas' levels
+    buddy/rules.ts               the wild pandas' rules admins set: defaults, limits, the form, what they add up to
+    buddy/battle.ts              the battle engine (pure; the server plays every turn with it)
+    buddy/wild.ts                wild pandas turning up, battles and catches (server only)
+    buddy/pathing.ts             keeping pandas off what's drawn: obstacles, a grid, A* paths
     canvas/images.ts             images, GIF and video players, local cache, uploads
     http/range.ts                HTTP Range header parsing
     collab/ops.ts                per-element operations and applyOps (client and server)
@@ -757,7 +962,7 @@ stops when the system asks for reduced motion.
 [Accounts and sessions](#accounts-and-sessions); `users.role` and `audit_events` (`actor_id`,
 `user_id`, `action`, `details` jsonb, `created_at`) under [Roles](#roles-and-the-admin-dashboard);
 `site_settings` (`key`, `value` jsonb, `updated_by`, `updated_at`) holds the
-[seasonal theme](#seasonal-themes) (`seasonal_theme`);
+[seasonal theme](#seasonal-themes) (`seasonal_theme`) and the wild pandas' rules (`wild_pandas`);
 `users.stripe_customer_id` links an account to its Stripe customer.
 `subscriptions`: `id` (Stripe's `sub_...`, or `comp_...`), `user_id` (cascade delete), `customer_id`,
 `status`, `price_id`, `current_period_end`, `cancel_at` (set once cancelled), `ended_at`. See
@@ -777,9 +982,15 @@ every applied change), `share_token` (the invite link's secret, null when off), 
 `users.avatar_updated_at` (null when there's no picture, otherwise its version). `user_preferences`:
 `user_id`, `preferences` (jsonb: `drawEffect`, `boardEffects`), `updated_at`. See
 [Settings](#settings-profile-pictures-and-effects).
-`buddy_settings`, `study_events`, `buddy_collection`, `buddy_encounters`, `buddy_stats` and
-`users.level` belong to the study buddies on the `dev` branch and are unused here (see
-[Study buddies](#study-buddies-on-the-dev-branch)).
+`buddy_settings`: `user_id`, `settings` (jsonb: visible, wander, roam, tricks, wild, daily goal, buddies
+with name, colour, spot and, for a caught one, `catchId`). `study_events`: `user_id`, `kind` (`review`
+or `task`), `ref` (drawing and card id for tasks, unique per person so a card counts once), `at`.
+Progress and bamboo are worked out from these when asked; the level is also kept on `users.level`.
+`buddy_collection`: `id`, `user_id` (cascade delete), `name`, `rarity`, `ability`, `level`,
+`caught_at`: pandas caught, for good. `buddy_encounters`: `id`, `user_id`, `name`, `rarity`, `ability`,
+`level`, `status` (`wild`, `battle`, then `caught`, `won`, `lost`, `ran`, `fled` or `gone`), `state`
+(jsonb: the battle), `created_at`, `expires_at`, `ended_at`. `buddy_stats`: `user_id`, `bamboo_spent`,
+`caught`, `won`, `last_wild_at` (the clock for the next wild panda).
 
 `data` is vector JSON in world coordinates, with no fixed board size:
 
@@ -915,17 +1126,54 @@ it. `e2e/mock-mail.mjs` keeps every email the app sends, for the tests to read c
   GIFs (stored as uploaded, animating, pausing, reduced motion); videos (first frame, play, pause, the
   time, byte ranges, size and type limits in the browser and on the server, a refused upload being
   undone, reloading) and a view-only collaborator playing a video but not moving cards.
-- `e2e/test-admin.mjs` (51 checks): `npm run role` (and its refusal for unconfirmed emails); `/admin`
+- `e2e/test-buddies.mjs` (42 checks): the panda showing up with a greeting once a day, its
+  progress card, dragging and arrow keys (remembered after a reload), settings from the account menu
+  (another buddy, a name, a colour, the daily goal), hiding, undo and bringing them back; following
+  progress (an answer counted, level 2 and its scarf, the daily goal, the end of a round, the streak, a
+  to-do card moved to Done counted once); the level on their record (put there as soon as a to-do
+  card is finished, left alone by events added behind the app's back until progress is read, then
+  put right); and the API (time zones, limits, sign-in and membership).
+  Other suites start with buddies hidden (`signUp(page, { buddies: true })` keeps them).
+- `e2e/test-wild.mjs` (125 checks): older settings getting the new defaults; level 6 and its bamboo; a
+  caught panda keeping its rarity; **Show me** from the card (Bao sprinting all the way across the
+  screen and walking back to exactly its spot, a rare panda dancing on the spot, reduced motion);
+  the buddy settings' switches in order (walking on drawings needing wandering); buddies climbing onto
+  the canvas (inside the board, not over the app), walking about on the part in view and never napping,
+  snacking or dancing on the move; a walking panda stopping when pressed and dancing on the spot;
+  scrolling the drawing carrying them with it; zooming in and far out changing their size exactly as
+  much as the drawing's, on the same spot; staying put while left zoomed out, and drawn right on their
+  spots when zoomed back in; panning far away leaving them in their spots, still there on panning back,
+  and still there after a reload; keeping off the drawing (stepping off shapes drawn under
+  them, never setting foot on them while walking about, Bao's sprint going round them, stepping aside
+  when a box is drawn right where one stands, hopping off after being put down on one); a wild panda
+  turning up on the canvas (its label, a buddy
+  pointing it out); a battle (the intro, the cards, the moves with Bao's own, a turn played on the
+  server and shown as the server says, a stale turn and a bad switch refused, bamboo, the catch, the
+  collection, the party, bamboo spent, the newcomer saying hello); running away (and closing part-way);
+  wandering off when its time is up; the real 60 % chance and the 4-minute wait; a catch waiting at
+  home with three out; a new member at level 1 (on their record) whose first look starts the clock
+  and who then meets a common panda of level 1 or 2; the API's checks (404, 409, 410, 422, 401, 402,
+  someone else's panda, wild pandas switched off, caught pandas that aren't yours or come twice); `/buddies`
+  (the party, every catch, the field guide's levels, bamboo, **Out with you**); the Settings page's
+  switches; the account menu opening `/buddies` where no buddies are out; and the rules admins set
+  (switched off for everyone: none turn up, the wait isn't used up and the buddies are told; only
+  golden pandas, from level 1, every time: none before the 2-minute wait, then one at once of that kind,
+  staying the minute set, battling with the catch and run-off chances set; the field guide and its
+  catching steps following along).
+- `e2e/test-admin.mjs` (64 checks): `npm run role` (and its refusal for unconfirmed emails); `/admin`
   is a 404 for users and leads unconfirmed accounts to confirm first, and staff get the sidebar and
   menu links; the totals; search as you type in the address without filling the history; newest first;
   ← 1 2 3 4 5 →, page 2, Next, the window sliding (3–7 on page 5, 5–9 on the last), reload, Back,
   a page past the end, no matches; the role filter and the status totals as filters; the edit panel
-  in the address and surviving a reload; saving a name (with the audit row and the history), a taken
+  in the address and surviving a reload, with the study level on their record; saving a name (with the audit row and the history), a taken
   email, a new email, unconfirming, complimentary memberships, closing; changing roles, which take
   effect on the next page, and not your own; signing someone out everywhere and emailing a reset link.
   Support: searching, fixing a name and giving memberships, but not emails, roles or staff accounts,
   even with the fields unlocked in the browser or the form pointed at another account; an admin
-  whose role is removed mid-session.
+  whose role is removed mid-session; and **Wild pandas** (the defaults, each kind's share, Save off until
+  something changes, the summary and shares following what's typed, saving for everyone with who and
+  what it adds up to, a number out of range refused by name, every kind set to never refused,
+  switching them off, Reset to defaults, and support staff not getting it).
 - `e2e/test-seasons.mjs` (26 checks): Automatic on a December, October, Easter-week and July day (the
   browser's clock moved to each); snow, bats and petals; the landing page staying prerendered; an
   admin choosing Christmas in July, stored with who changed it, on the landing and pricing pages;
@@ -944,7 +1192,15 @@ it. `e2e/mock-mail.mjs` keeps every email the app sends, for the tests to read c
 
 `npm run test:unit` runs quick checks of the chemistry parser and balancer, the graph expression
 parser, the collaboration model (two simulated tabs against a fake server), to-do board layout and card
-moves, Range header parsing, the seasonal
+moves, Range header parsing, study buddy levels, streaks, lines and finished tasks, rarities (their
+levels and how often each turns up), the wild pandas' rules (defaults, stored values falling back one
+at a time, the admin form's numbers and its refusals, shares, how far apart, what browsers are told,
+level-up lines that follow them, battles keeping their rates), wild pandas' levels, starter tricks,
+bamboo, and the battle engine
+(stats, who goes first, catching, switching, winning, losing, running, fleeing, and 300 random battles
+that all end with energy in range), the pandas' path-finding (blocked spots, the way round a wall
+through its gap checked every step of the way, no way through a wall without one, the nearest clear
+spot, pen strokes cut into pieces so a drawn circle's middle is clear, erasers ignored), the seasonal
 themes' dates (Easter Sundays from 2024 to 2285, and each theme's first and last day), the admin
 dashboard's address handling and five-page window, the settings' parsing, profile picture URLs and type
 sniffing, and the drawing and to-do board effects (what replays, what waits, ghosts, glides from a

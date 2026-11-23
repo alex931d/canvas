@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 /*
  * Toasts: short notes at the bottom of the screen.
  *
- *   toast("Drawing deleted", { description, action: { label: "Undo", onClick } })
+ *   toast("Study buddies hidden", { description, action: { label: "Undo", onClick } })
  *   toast.success("Saved.")   toast.error("Couldn't save.")   toast.info(…)
  *   toast.loading("Adding the video…", { id: "media" })   toast.dismiss("media")
  *

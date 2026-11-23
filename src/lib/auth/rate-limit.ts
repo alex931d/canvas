@@ -102,6 +102,10 @@ function makeLimiters() {
     flashcardsByUser: new RefillingTokenBucket<string>(60, 2),
     /** Images, GIFs and videos uploaded: 100, then one every 6 s, per user. */
     uploadsByUser: new RefillingTokenBucket<string>(100, 6),
+    /** Study buddy settings saved: 60, then one a second, per user. */
+    buddyByUser: new RefillingTokenBucket<string>(60, 1),
+    /** Looking for wild pandas: 20, then one every 10 s, per user. */
+    wildByUser: new RefillingTokenBucket<string>(20, 10),
     /** Battle turns: 120, then two a second, per user. */
     battleByUser: new RefillingTokenBucket<string>(120, 0.5),
     /** Name and profile picture changes: 20, then one every 15 s, per user. */

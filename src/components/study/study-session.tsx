@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useEffectEvent, useState, useTransition } from "react";
 import { Button, Kbd, toast } from "@/components/kit";
 import { reviewCard } from "@/app/study/actions";
+import { emitBuddy } from "@/lib/buddy/events";
 import { gapLabel, type Grade } from "@/lib/study/schedule";
 import { cn } from "@/lib/utils";
 
@@ -41,6 +42,9 @@ export function StudySession({ cards }: { cards: SessionCard[] }) {
   const grade = (g: Grade) => {
     if (!card || !revealed) return;
     const reviewed = card;
+    // The last card answered (not one to try again): the round is over.
+    const finishing = g !== "again" && queue.length === 1;
+    const count = done.reviewed + 1;
     setRevealed(false);
     setDone((d) => ({ reviewed: d.reviewed + 1, remembered: d.remembered + (g === "again" ? 0 : 1) }));
     setQueue((q) => {
@@ -54,7 +58,9 @@ export function StudySession({ cards }: { cards: SessionCard[] }) {
       const res = await reviewCard(reviewed.id, g).catch(() => null);
       if (!res?.ok) {
         toast.error(res?.error ?? "Couldn't save that answer. Check your connection.", { id: "review" });
+        return;
       }
+      emitBuddy(finishing ? { kind: "session-done", reviewed: count } : { kind: "review", grade: g });
     });
   };
 

@@ -66,6 +66,7 @@ import type { HistoryAction } from "@/lib/collab/doc";
 import type { Peer } from "@/lib/collab/peers";
 import { subscribeMath, texSource, typesetMath } from "@/lib/math/layout";
 import type { DrawEffect } from "@/lib/preferences";
+import { publishScene, publishView } from "@/lib/canvas/view-bus";
 import { EquationEditor, type EquationValue } from "./equation-editor";
 import { GRAPH_COLORS, GraphEditor } from "./graph-editor";
 import { KanbanEditor, type KanbanEdit, type KanbanEditorHandle } from "./kanban-editor";
@@ -626,9 +627,15 @@ export function Board({
       camRef.current = c;
       setCam(c);
       schedulePaint();
+      // The study buddies walking on the canvas follow it in the same frame.
+      publishView(c);
     },
     [schedulePaint],
   );
+  useEffect(() => () => publishView(null), []);
+  // …and what's drawn, so they can keep off it.
+  useEffect(() => publishScene(elements), [elements]);
+  useEffect(() => () => publishScene(null), []);
 
   const zoomAt = useCallback(
     (sx: number, sy: number, z: number) => {
@@ -2085,6 +2092,8 @@ export function Board({
   return (
     <div
       ref={wrapRef}
+      // Study buddies on the canvas live in here (src/components/buddy/canvas-buddies.tsx).
+      data-buddy-stage
       // Absolutely filling the card avoids percentage heights, which don't
       // resolve inside nested column flex layouts on phones.
       className="absolute inset-0 overflow-hidden"

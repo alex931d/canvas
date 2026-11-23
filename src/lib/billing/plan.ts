@@ -25,5 +25,6 @@ export const MEMBERSHIP_INCLUDES = [
   "Step-by-step math checks, equations and graphs",
   "Chemistry tools, flashcards and to-do boards",
   "Live drawing with other members",
+  "Study buddies that keep your streak",
   "Cancel any time",
 ] as const;

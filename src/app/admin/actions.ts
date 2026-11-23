@@ -10,8 +10,9 @@ import { isValidEmail, normalizeEmail } from "@/lib/auth/account";
 import { sendPasswordResetLink } from "@/lib/auth/password-reset";
 import { can, canManage, isRole, roleChangeBlocked, type Permission, type Role } from "@/lib/auth/roles";
 import { getCurrentSession } from "@/lib/auth/session";
+import { apartText, DEFAULT_RULES, rulesFromForm, type WildRules } from "@/lib/buddy/rules";
 import { isThemeMode, THEME_INFO } from "@/lib/seasons";
-import { saveSeasonalMode } from "@/lib/site/settings";
+import { saveSeasonalMode, saveWildRules } from "@/lib/site/settings";
 import { emailLinkOrigin } from "@/lib/site-url";
 
 /*
@@ -218,5 +219,41 @@ export async function saveSeasonalTheme(_prev: AdminActionState, formData: FormD
         : mode === "off"
           ? "Saved. No seasonal theme for now."
           : `Saved. Everyone sees the ${THEME_INFO[mode].label} theme now.`,
+  };
+}
+
+export type WildActionState = {
+  ok?: string;
+  error?: string;
+  /** Problems by field name ("chance", "rare.weight"). */
+  fieldErrors?: Record<string, string>;
+  /** What was saved, for the form to show. */
+  saved?: WildRules;
+};
+
+/** How wild pandas turn up and battle, for everyone (src/lib/buddy/rules.ts); or back to the defaults. */
+export async function saveWildPandas(_prev: WildActionState, formData: FormData): Promise<WildActionState> {
+  const actor = await staff("site:settings");
+  if (!actor) return NO_ACCESS;
+  if (formData.get("intent") === "defaults") {
+    await saveWildRules(DEFAULT_RULES, actor.id);
+    refresh();
+    return { ok: "Back to the defaults.", saved: DEFAULT_RULES };
+  }
+  const result = rulesFromForm(formData);
+  if (result.errors) {
+    const count = Object.keys(result.errors).filter((k) => k !== "form").length;
+    return {
+      error: result.errors.form ?? (count === 1 ? "One number needs fixing." : `${count} numbers need fixing.`),
+      fieldErrors: result.errors,
+    };
+  }
+  await saveWildRules(result.rules, actor.id);
+  refresh();
+  return {
+    ok: result.rules.on
+      ? `Saved. With a drawing open, wild pandas now turn up ${apartText(result.rules)}.`
+      : "Saved. No new wild pandas will turn up until they're switched back on.",
+    saved: result.rules,
   };
 }

@@ -272,6 +272,11 @@ check(
 await admin.reload({ waitUntil: "networkidle0" });
 await admin.waitForSelector(`${panel} #admin-name`, { timeout: 10_000 }).catch(() => {});
 check("a reload keeps it open", !!(await admin.$(`${panel} #admin-name`)));
+// The study level on their record (set straight in the database here).
+sql(`update users set level = 4 where id = '${z1}'`);
+await admin.reload({ waitUntil: "networkidle0" });
+await admin.waitForSelector(`${panel} #admin-name`, { timeout: 10_000 }).catch(() => {});
+check("the panel shows the study level on their record", (await panelText(admin)).includes("Study level 4."), await panelText(admin));
 
 await retype(admin, "#admin-name", `Zed ${TAG} Renamed`);
 await act(admin, panelButton("Save changes"));
@@ -440,6 +445,95 @@ await admin.goto(`${BASE}/admin`, { waitUntil: "networkidle0" });
 await admin.waitForSelector("h1");
 check("…and gets the 404 page next time", /doesn.t exist/.test(await admin.$eval("h1", (h) => h.textContent)));
 sql(`update users set role = 'admin' where id = '${ada.id}'`);
+
+// ================================================================= wild pandas
+sql(`delete from site_settings where key = 'wild_pandas'`);
+const wildForm = "[data-testid=wild-rules-form]";
+const wildButton = (label) => `xpath/.//form[@data-testid='wild-rules-form']//button[normalize-space()='${label}']`;
+const wildText = () => admin.$eval(wildForm, (f) => f.innerText);
+const wildSummary = () => admin.$eval("[data-testid=wild-summary]", (p) => p.textContent);
+const wildShares = () => admin.$$eval("[data-testid=wild-share]", (s) => s.map((x) => x.textContent).join(", "));
+const wildValue = (id) => admin.$eval(`#${id}`, (i) => i.value);
+const storedWild = () => JSON.parse(sql(`select value from site_settings where key = 'wild_pandas'`) || "null");
+await admin.goto(`${BASE}/admin`, { waitUntil: "networkidle0" });
+await admin.waitForSelector(wildForm);
+check(
+  "admins get the wild pandas' rules, at the defaults",
+  /Never changed: the defaults\./.test(await wildText()) &&
+    (await wildValue("wild-chance")) === "60" &&
+    (await wildValue("wild-rare-catchRate")) === "38" &&
+    (await wildSummary()) === "With a drawing open, about one every 6½ minutes, staying 3 minutes.",
+  await wildSummary(),
+);
+check("…with each kind's share at the top level", (await wildShares()) === "58 % of them, 28 % of them, 11 % of them, 3 % of them", await wildShares());
+check("Save is off until something changes", await admin.$eval(wildButton("Save wild pandas"), (b) => b.disabled));
+await retype(admin, "#wild-chance", "100");
+await retype(admin, "#wild-gapMinutes", "2");
+check("the summary follows what's typed", (await wildSummary()) === "With a drawing open, about one every 2 minutes, staying 3 minutes.", await wildSummary());
+await retype(admin, "#wild-common-weight", "0");
+check(
+  "…and so do the shares, and who meets them",
+  (await wildShares()) === "never, 67 % of them, 26 % of them, 7 % of them" && /for members from level 3\.$/.test(await wildSummary()),
+  `${await wildShares()} | ${await wildSummary()}`,
+);
+await act(admin, wildButton("Save wild pandas"));
+let wildSaved = storedWild();
+check(
+  "saving stores them for everyone",
+  wildSaved?.chance === 1 &&
+    wildSaved.gapMinutes === 2 &&
+    wildSaved.kinds.common.weight === 0 &&
+    wildSaved.kinds.rare.catchRate === 0.38 &&
+    sql(`select updated_by from site_settings where key = 'wild_pandas'`) === ada.id,
+  JSON.stringify(wildSaved),
+);
+check(
+  "…and says what they add up to, and who changed them",
+  /Saved\. With a drawing open, wild pandas now turn up about one every 2 minutes\./.test(await wildText()) &&
+    /Last changed by Ada Admin/.test(await wildText()),
+  await wildText(),
+);
+await retype(admin, "#wild-superRare-flee", "80");
+await act(admin, wildButton("Save wild pandas"));
+check(
+  "a number out of range is refused, by name",
+  /One number needs fixing\./.test(await wildText()) &&
+    /From 0 to 50 %\./.test(await wildText()) &&
+    (await admin.$eval("#wild-superRare-flee", (i) => i.getAttribute("aria-invalid"))) === "true" &&
+    storedWild().kinds.superRare.flee === 0.1,
+);
+await retype(admin, "#wild-superRare-flee", "10");
+for (const r of ["uncommon", "rare", "superRare"]) await retype(admin, `#wild-${r}-weight`, "0");
+await act(admin, wildButton("Save wild pandas"));
+check(
+  "every kind set to never is refused",
+  /Give at least one kind a chance to turn up/.test(await wildText()) && storedWild().kinds.uncommon.weight === 28,
+);
+await retype(admin, "#wild-uncommon-weight", "28");
+await admin.click(`${wildForm} [role=switch]`);
+await act(admin, wildButton("Save wild pandas"));
+wildSaved = storedWild();
+check(
+  "switching them off for everyone",
+  wildSaved.on === false && wildSaved.kinds.uncommon.weight === 28 && /No new wild pandas will turn up/.test(await wildText()),
+  JSON.stringify(wildSaved),
+);
+await act(admin, wildButton("Reset to defaults"));
+wildSaved = storedWild();
+check(
+  "Reset to defaults puts everything back",
+  wildSaved.on === true &&
+    wildSaved.chance === 0.6 &&
+    wildSaved.gapMinutes === 4 &&
+    wildSaved.kinds.common.weight === 58 &&
+    (await wildValue("wild-chance")) === "60" &&
+    (await wildValue("wild-common-weight")) === "58" &&
+    /Back to the defaults\./.test(await wildText()),
+  JSON.stringify(wildSaved),
+);
+await sup.goto(`${BASE}/admin`, { waitUntil: "networkidle0" });
+check("support staff don't get them", !(await sup.$(wildForm)) && !!(await sup.$("[data-testid=users-table]")));
+sql(`delete from site_settings where key = 'wild_pandas'`);
 
 console.log("\nerrors:", errors.length ? errors : "none");
 check("no page errors", errors.length === 0);
