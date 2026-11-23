@@ -1,19 +1,14 @@
-import { GalleryVerticalEnd, LayoutGrid, PawPrint } from "lucide-react";
+import { GalleryVerticalEnd, LayoutGrid } from "lucide-react";
 import type { Metadata } from "next";
-import Link from "next/link";
 import { Suspense } from "react";
 import { StaffSidebarLink } from "@/components/admin/staff-sidebar-link";
 import { AppSidebar, SidebarLink } from "@/components/app-sidebar";
 import { Skeleton } from "@/components/kit";
 import { Reveal } from "@/components/motion/reveal";
-import { BuddiesSection } from "@/components/settings/buddies-section";
 import { EffectsSection } from "@/components/settings/effects-section";
 import { ProfileSection } from "@/components/settings/profile-section";
 import { HeaderUserMenu, SidebarUserMenu } from "@/components/user-menu";
 import { requireUser } from "@/lib/auth/session";
-import { getMembership } from "@/lib/billing/membership";
-import { getSettings } from "@/lib/buddy/progress";
-import { getWildRules } from "@/lib/site/settings";
 import { getPreferences } from "@/lib/profile/server";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -28,7 +23,7 @@ async function HeaderUser() {
   return <HeaderUserMenu user={user} className="md:hidden" />;
 }
 
-/** Your name and picture, how drawings and to-do boards animate, and what the study buddies get up to. */
+/** Your name and picture, and how drawings and to-do boards animate. */
 export default function SettingsPage() {
   return (
     <div className="flex min-h-dvh flex-col md:flex-row">
@@ -41,7 +36,6 @@ export default function SettingsPage() {
       >
         <SidebarLink href="/" icon={<LayoutGrid />} label="Drawings" />
         <SidebarLink href="/study" icon={<GalleryVerticalEnd />} label="Study" />
-        <SidebarLink href="/buddies" icon={<PawPrint />} label="Buddies" />
         <Suspense fallback={null}>
           <StaffSidebarLink />
         </Suspense>
@@ -66,8 +60,7 @@ export default function SettingsPage() {
 
 async function SettingsContent() {
   const user = await requireUser();
-  const [preferences, { isMember }] = await Promise.all([getPreferences(user.id), getMembership(user.id)]);
-  const [buddies, rules] = isMember ? await Promise.all([getSettings(user.id), getWildRules()]) : [null, null];
+  const preferences = await getPreferences(user.id);
   return (
     <div className="grid gap-6">
       <Reveal as="section" aria-labelledby="profile-title" className="rounded-xl bg-card p-5 md:p-8">
@@ -81,21 +74,6 @@ async function SettingsContent() {
           Effects
         </h2>
         <EffectsSection initial={preferences} />
-      </Reveal>
-      <Reveal as="section" aria-labelledby="buddies-title" className="rounded-xl bg-card p-5 md:p-8">
-        <h2 id="buddies-title" className="mb-6 text-xl font-bold">
-          Study buddies
-        </h2>
-        {buddies ? (
-          <BuddiesSection initial={buddies} wildOn={rules?.on ?? true} />
-        ) : (
-          <p className="text-sm text-grey-500">
-            Study buddies come with membership.{" "}
-            <Link href="/pricing" className="font-semibold text-green underline-offset-4 hover:underline">
-              See membership
-            </Link>
-          </p>
-        )}
       </Reveal>
     </div>
   );

@@ -14,17 +14,6 @@ export const PASSWORD = "correct horse battery staple 42";
 export const grantMembership = (userId) =>
   sql(`insert into subscriptions (id, user_id, status) values ('comp_' || gen_random_uuid(), '${userId}', 'active')`);
 
-/** Study buddies float over the page and could catch a test's clicks, so tests start with them hidden. */
-export const hideBuddies = (userId) =>
-  sql(
-    `insert into buddy_settings (user_id, settings) values ('${userId}', '${JSON.stringify({
-      visible: false,
-      wander: true,
-      dailyGoal: 20,
-      buddies: [{ id: "bao", name: "Bao", color: "#277c78", x: null, y: null }],
-    })}') on conflict (user_id) do nothing`,
-  );
-
 /** Messages the app has sent to this address (e2e/mock-mail.mjs), oldest first. */
 export const INBOX = process.env.MOCK_INBOX_URL ?? "http://localhost:2526";
 export async function inbox(to) {
@@ -54,12 +43,12 @@ export const captchaReady = (page) =>
  * The email is then marked confirmed directly in the database (e2e/test-account.mjs
  * covers the real code). With `member` (the default) the account gets a
  * complimentary membership and the page goes on to the gallery; otherwise to
- * the pricing page, where non-members start one. Study buddies start hidden unless `buddies` is true.
+ * the pricing page, where non-members start one.
  * With `verify: false` the account stays unconfirmed, on /verify-email.
  */
 export async function signUp(
   page,
-  { name = "Test Person", email = uniqueEmail(), password = PASSWORD, member = true, buddies = false, verify = true } = {},
+  { name = "Test Person", email = uniqueEmail(), password = PASSWORD, member = true, verify = true } = {},
 ) {
   // Sign-ups are limited to 3 per IP with one more every 10 s; suites run
   // back to back can hit that, so wait it out like a person would.
@@ -79,7 +68,6 @@ export async function signUp(
   }
   const id = sql(`select id from users where email = '${email}'`);
   if (!id) throw new Error("sign-up didn't create a user");
-  if (!buddies) hideBuddies(id);
   if (!verify) {
     await page.waitForSelector("#code", { timeout: 10_000 });
     return { name, email, password, id };

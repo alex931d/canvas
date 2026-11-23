@@ -185,7 +185,6 @@ for (const url of ["/", "/study", "/membership", "/drawings/00000000-0000-4000-8
   blocked.push(path(p));
 }
 const api = await p.evaluate(async () => [
-  (await fetch("/api/buddy")).status,
   (await fetch("/api/flashcards", { method: "POST", body: new FormData() })).status,
 ]);
 check(

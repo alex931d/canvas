@@ -2,7 +2,7 @@
 // parser, molar masses and the balancer, the graph expression parser, the
 // collaboration document model (two simulated tabs and a fake server),
 // to-do board layout and card moves, byte ranges for video, the schemas,
-// the study buddies' levels, streaks and lines, and the seasonal themes' dates.
+// and the seasonal themes' dates.
 //   npm run test:unit
 import { balanceEquation } from "../src/lib/chem/balance";
 import { ELEMENTS } from "../src/lib/chem/elements";
@@ -12,7 +12,6 @@ import {
   addColumn,
   dropSlot,
   findCard,
-  finishedCards,
   kanbanLayout,
   kanbanMinWidth,
   kanbanPartAt,
@@ -24,9 +23,6 @@ import {
 } from "../src/lib/canvas/kanban";
 import { assetIdsOf, elementSchema, type CanvasElement, type KanbanElement } from "../src/lib/canvas/schema";
 import { parseRange } from "../src/lib/http/range";
-import { buildGrid, clearLine, edgeSpots, findPath, freeSpots, isFree, nearestFree, obstaclesOf, pathClear, touchesDrawing } from "../src/lib/buddy/pathing";
-import { afterReview, levelUp } from "../src/lib/buddy/lines";
-import { accessoriesFor, DEFAULT_SETTINGS, levelFor, settingsSchema, streakFrom, type Progress } from "../src/lib/buddy/shared";
 import { CollabDoc, type RemoteChange } from "../src/lib/collab/doc";
 import { applyOps, type DocOp } from "../src/lib/collab/ops";
 import { compileExpression, ExprError, formatTick, niceStep } from "../src/lib/math/expr";
@@ -35,9 +31,6 @@ import { adminHref, pageWindow, parseAdminQuery } from "../src/lib/admin/query";
 import { ElementEffects, inkLength, MAX_ANIMATED, staggerStep, traceDuration } from "../src/lib/canvas/effects";
 import { KanbanEffects } from "../src/lib/canvas/kanban-fx";
 import { DEFAULT_PREFERENCES, parsePreferences } from "../src/lib/preferences";
-import { act, BattleError, catchChance, makeFighter, ratesOf, startBattle, viewOf, type BattleState } from "../src/lib/buddy/battle";
-import { ABILITY_POOL, bambooFor, DEFAULT_KINDS, pickRarity, raritiesAt, rollWild, starterAbility } from "../src/lib/buddy/kinds";
-import { apartText, DEFAULT_RULES, firstLevel, openingsOf, rulesFrom, rulesFromForm, sharesAt } from "../src/lib/buddy/rules";
 import { avatarUrl, sniffImageType } from "../src/lib/profile/avatar";
 
 let fails = 0;
@@ -312,32 +305,6 @@ eq("range: backwards", parseRange("bytes=50-10", 1000), "invalid");
 eq("range: several ranges ignored", parseRange("bytes=0-1,5-6", 1000), null);
 eq("range: none", parseRange(null, 1000), null);
 
-// ------------------------------------------------ study buddies
-eq("level 1 at 0 points", levelFor(0), { level: 1, floor: 0, next: 20 });
-eq("level 2 at 20", levelFor(20).level, 2);
-eq("level 3 just below 100", levelFor(99).level, 3);
-eq("top level", levelFor(5000), { level: 10, floor: 1000, next: null });
-eq("unlocks by level", [accessoriesFor(1), accessoriesFor(4), accessoriesFor(9)], [[], ["scarf", "glasses"], ["scarf", "glasses", "cap"]]);
-eq("level-up line names the unlock", levelUp(4), "Level 4! I got reading glasses.");
-eq("streak: today and the two days before", streakFrom(["2026-11-18", "2026-11-17", "2026-11-16", "2026-11-14"], "2026-11-18"), 3);
-eq("streak still counts from yesterday", streakFrom(["2026-11-17", "2026-11-16"], "2026-11-18"), 2);
-eq("streak broken", streakFrom(["2026-11-15"], "2026-11-18"), 0);
-eq("streak across a month end", streakFrom(["2026-12-01", "2026-11-30"], "2026-12-01"), 2);
-eq("default settings are valid", settingsSchema.safeParse(DEFAULT_SETTINGS).success, true);
-eq("four buddies refused", settingsSchema.safeParse({ ...DEFAULT_SETTINGS, buddies: Array(4).fill(DEFAULT_SETTINGS.buddies[0]) }).success, false);
-const prog = (reviews: number): Progress => ({ today: { reviews, tasks: 0 }, streak: 1, points: reviews, level: 1, levelFloor: 0, nextLevel: 20 });
-eq("first answer gets a word", afterReview("good", prog(1), { answered: 1, missed: 0 }) !== null, true);
-eq("most answers get nothing", afterReview("good", prog(3), { answered: 3, missed: 0 }), null);
-eq("every fifth card today", afterReview("easy", prog(10), { answered: 4, missed: 0 })?.startsWith("10 cards today."), true);
-eq("first miss gets encouragement, the next doesn't", [afterReview("again", prog(2), { answered: 2, missed: 1 }) !== null, afterReview("again", prog(3), { answered: 3, missed: 2 })], [true, null]);
-const todoBoard = withCards(kb0, 0, ["Essay"]);
-const essay = todoBoard.columns[0].cards[0].id;
-const moved = moveCard(todoBoard, todoBoard, { cardId: essay, columnId: todoBoard.columns[2].id, index: 0 })!;
-eq("a card moved to Done is finished", finishedCards([todoBoard], moved), [essay]);
-eq("one already in Done isn't", finishedCards(moved, moved), []);
-eq("a card added straight to Done isn't", finishedCards([kb0], [withCards(kb0, 2, ["New"])]), []);
-eq("one-column boards have no Done", finishedCards([{ ...todoBoard, columns: [todoBoard.columns[0]] }], [{ ...todoBoard, columns: [todoBoard.columns[0]] }]), []);
-
 // ------------------------------------------------------------ seasonal themes
 eq("Easter Sundays", [2024, 2025, 2026, 2027, 2038, 2285].map(easterSunday), [
   { month: 3, day: 31 },
@@ -438,259 +405,6 @@ kfx.setEnabled(false);
 kfx.change(withTwo, finished);
 eq("board effects off: no animations", kfx.busy, false);
 
-// ------------------------------------------------------------ panda battles
-/** A repeatable random sequence (mulberry32). */
-const seeded = (seed: number) => () => {
-  seed |= 0;
-  seed = (seed + 0x6d2b79f5) | 0;
-  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-};
-const always = (v: number) => () => v;
-eq("which rarities turn up at each level", [1, 2, 3, 5, 7].map((l) => raritiesAt(l).join(",")), ["common", "common", "common,uncommon", "common,uncommon,rare", "common,uncommon,rare,superRare"]);
-{
-  const rng = seeded(3);
-  const first = Array.from({ length: 300 }, () => rollWild(1, rng));
-  eq(
-    "wild pandas turn up from level 1: common ones, level 1 or 2",
-    [first.every((w) => w?.rarity === "common"), Math.min(...first.map((w) => w!.level)), Math.max(...first.map((w) => w!.level))],
-    [true, 1, 2],
-  );
-}
-{
-  const rng = seeded(7);
-  const counts: Record<string, number> = { common: 0, uncommon: 0, rare: 0, superRare: 0 };
-  for (let i = 0; i < 20000; i++) counts[pickRarity(10, rng)!]++;
-  const shares = [counts.common, counts.uncommon, counts.rare, counts.superRare].map((n) => n / 200);
-  eq("rarities come about as often as their weights say (58/28/11/3, within 2 points)", [58, 28, 11, 3].every((want, i) => Math.abs(shares[i] - want) < 2), true, );
-  const wild = Array.from({ length: 400 }, () => rollWild(4, rng)!);
-  eq("at level 4: only common and uncommon, levels 3–5", [new Set(wild.map((w) => w.rarity)).size, Math.min(...wild.map((w) => w.level)), Math.max(...wild.map((w) => w.level))], [2, 3, 5]);
-  eq("every wild trick suits its rarity", wild.every((w) => ABILITY_POOL[w.rarity].includes(w.ability)), true);
-}
-eq("Bao sprints; other made-up buddies get a common trick", [starterAbility("bao"), ABILITY_POOL.common.includes(starterAbility("b1x9")), starterAbility("b1x9") === starterAbility("b1x9")], ["sprint", true, true]);
-eq("bamboo: 5 to start and one per 10 points, less what's been offered", [bambooFor(0, 0), bambooFor(37, 2), bambooFor(5, 9)], [5, 6, 0]);
-eq("old buddy settings get the new switches", (({ roam, tricks, wild }) => ({ roam, tricks, wild }))(settingsSchema.parse({ visible: true, wander: true, dailyGoal: 20, buddies: [{ id: "bao", name: "Bao", color: "#277c78", x: null, y: null }] })), { roam: false, tricks: true, wild: true });
-eq("levelling up mentions what can turn up now", [levelUp(2), levelUp(5), levelUp(9)], ["Level 2! I got a scarf.", "Level 5! Rare pandas can turn up now.", "Level 9!"]);
-
-const mochi = { id: "mochi", name: "Mochi", rarity: "common" as const, ability: "sprint" as const, color: "#277c78" };
-const bao = { id: "bao", name: "Bao", rarity: "common" as const, ability: "nap" as const, color: "#c94736" };
-const pip = { id: "wild", name: "Pip", rarity: "rare" as const, ability: "roll" as const, level: 3, color: "" };
-eq("a level 3 common panda: energy, strength, speed (sprinters are quick)", (({ maxHp, attack, speed }) => ({ maxHp, attack, speed }))(makeFighter({ ...mochi, level: 3 })), { maxHp: 42, attack: 12, speed: 24 });
-eq("a rare one is tougher", makeFighter({ ...pip }).maxHp, 51);
-const opened = startBattle({ team: [mochi, bao], wild: pip, yourLevel: 3, bamboo: 4 });
-eq("a battle starts with the wild panda and your first buddy", opened.steps.map((s) => s.text), ["A rare panda wanders up: it's Pip!", "Go, Mochi!"]);
-const fresh = opened.state;
-eq("…your buddies fight at your level", fresh.you.map((b) => b.level), [3, 3]);
-eq("the weaker it is, the likelier bamboo works; rarer is harder", [
-  catchChance({ ...fresh.wild, hp: fresh.wild.maxHp }, 3) < catchChance({ ...fresh.wild, hp: 5 }, 3),
-  catchChance({ ...makeFighter({ ...pip, rarity: "common" }), hp: 5 }, 3) > catchChance({ ...fresh.wild, hp: 5 }, 3),
-], [true, true]);
-{
-  const r = act(fresh, { type: "move", move: "special" }, always(0.5));
-  eq("Dash goes first even against something as quick", r.steps[0].text, "Mochi used Dash!");
-  eq("…and does damage", [r.state.wild.hp < fresh.wild.hp, r.steps.some((s) => s.fx?.kind === "hit" && s.fx.side === "wild")], [true, true]);
-  eq("the old state is left alone", fresh.wild.hp, fresh.wild.maxHp);
-}
-{
-  const r = act(fresh, { type: "bamboo" }, always(0));
-  eq("bamboo that's taken: three nibbles and it joins you", [r.state.over, r.steps[0].fx, r.state.bamboo], ["caught", { kind: "bamboo", wobbles: 3, caught: true }, 3]);
-  const no = act(fresh, { type: "bamboo" }, always(0.99));
-  eq("bamboo pushed away: the wild panda gets its turn", [no.state.over, no.steps[0].fx, no.steps[1].text, no.steps[2].text], [null, { kind: "bamboo", wobbles: 0, caught: false }, "Pip pushed it away!", "Pip used Roll!"]);
-  let threw = "";
-  try {
-    act({ ...fresh, bamboo: 0 }, { type: "bamboo" }, Math.random);
-  } catch (e) {
-    threw = e instanceof BattleError ? e.message : "";
-  }
-  eq("no bamboo left: refused", threw, "You're out of bamboo. Study a little to earn more.");
-}
-{
-  const nearlyOut: BattleState = { ...fresh, you: fresh.you.map((b, i) => (i === 0 ? { ...b, hp: 1 } : b)) };
-  // rng 0.5: the wild panda swipes first (Mochi's Bump has no priority, and Pip is quicker).
-  const slow: BattleState = { ...nearlyOut, you: nearlyOut.you.map((b) => ({ ...b, speed: 1 })) };
-  const r = act(slow, { type: "move", move: "bump" }, always(0.5));
-  eq("worn out with another buddy left: you must pick one", [r.state.mustSwitch, r.state.over, r.steps.at(-1)?.text], [true, null, "Who's next?"]);
-  let blocked = false;
-  try {
-    act(r.state, { type: "move", move: "bump" }, always(0.5));
-  } catch {
-    blocked = true;
-  }
-  eq("…nothing else until you do", blocked, true);
-  const sw = act(r.state, { type: "switch", to: 1 }, always(0.5));
-  eq("…and that switch is free (no wild turn)", [sw.state.active, sw.steps.map((s) => s.text)], [1, ["Go, Bao!"]]);
-  const alone: BattleState = { ...slow, you: [slow.you[0]] };
-  eq("worn out with nobody left: the battle's lost", act(alone, { type: "move", move: "bump" }, always(0.5)).state.over, "lost");
-}
-{
-  const weak: BattleState = { ...fresh, wild: { ...fresh.wild, hp: 1 } };
-  const r = act(weak, { type: "move", move: "special" }, always(0.5));
-  eq("wearing it out ends it (it wanders off, uncaught)", [r.state.over, r.steps.at(-1)?.text], ["won", "Pip wanders off for a rest."]);
-  let over = false;
-  try {
-    act(r.state, { type: "run" }, Math.random);
-  } catch {
-    over = true;
-  }
-  eq("nothing more once it's over", over, true);
-  eq("running away always works", act(fresh, { type: "run" }, Math.random).state.over, "ran");
-}
-{
-  const seq = [0.99, 0.99];
-  const r = act({ ...fresh, turn: 1 }, { type: "move", move: "stare" }, () => seq.shift() ?? 0.01);
-  eq("a rare panda may run off from the second turn", r.state.over, "fled");
-  const early = act({ ...fresh, turn: 0 }, { type: "move", move: "stare" }, () => 0.01);
-  eq("…but not before", early.state.over === "fled", false);
-}
-{
-  let ok = true;
-  let longest = 0;
-  for (let seed = 1; seed <= 300; seed++) {
-    const rng = seeded(seed);
-    let { state } = startBattle({ team: [mochi, bao], wild: { ...pip, rarity: (["common", "uncommon", "rare", "superRare"] as const)[seed % 4] }, yourLevel: 1 + (seed % 9), bamboo: 3 });
-    let turns = 0;
-    while (!state.over && turns < 200) {
-      const live = state.you.map((b, i) => [b, i] as const).filter(([b, i]) => b.hp > 0 && i !== state.active);
-      const roll = rng();
-      const action = state.mustSwitch
-        ? { type: "switch" as const, to: live[0][1] }
-        : roll < 0.15 && state.bamboo > 0
-          ? { type: "bamboo" as const }
-          : { type: "move" as const, move: (["bump", "swipe", "stare", "special"] as const)[Math.floor(rng() * 4)] };
-      state = act(state, action, rng).state;
-      turns++;
-      if (state.you.some((b) => b.hp < 0 || b.hp > b.maxHp) || state.wild.hp < 0 || state.wild.hp > state.wild.maxHp) ok = false;
-    }
-    if (!state.over) ok = false;
-    longest = Math.max(longest, turns);
-  }
-  eq("300 random battles all end, with energy always in range", [ok, longest < 60], [true, true]);
-}
-
-// ------------------------------------------------------------ wild panda rules (admins change these)
-eq("rules: nothing stored is the defaults", rulesFrom(undefined), DEFAULT_RULES);
-eq("…the defaults are today's numbers", [DEFAULT_RULES.on, DEFAULT_RULES.chance, DEFAULT_RULES.gapMinutes, DEFAULT_RULES.stayMinutes, DEFAULT_RULES.kinds.rare], [true, 0.6, 4, 3, { weight: 11, minLevel: 5, levelBonus: 1, catchRate: 0.38, flee: 0.06 }]);
-eq(
-  "rules: an out-of-range value falls back by itself, the rest are kept",
-  (({ on, chance, gapMinutes, kinds }) => [on, chance, gapMinutes, kinds.rare, kinds.common])(rulesFrom({ on: false, chance: 7, gapMinutes: 10, kinds: { rare: { weight: -5, minLevel: 2 } } })),
-  [false, 0.6, 10, { ...DEFAULT_KINDS.rare, minLevel: 2 }, DEFAULT_KINDS.common],
-);
-eq("rules: junk is the defaults", [rulesFrom("nope"), rulesFrom([1, 2])], [DEFAULT_RULES, DEFAULT_RULES]);
-const ruleForm = (over: Record<string, string | null> = {}) => {
-  const fd = new FormData();
-  const base: Record<string, string> = { on: "on", chance: "60", gapMinutes: "4", stayMinutes: "3" };
-  for (const [r, k] of Object.entries(DEFAULT_KINDS)) {
-    base[`${r}.weight`] = String(k.weight);
-    base[`${r}.minLevel`] = String(k.minLevel);
-    base[`${r}.levelBonus`] = String(k.levelBonus);
-    base[`${r}.catchRate`] = String(Math.round(k.catchRate * 100));
-    base[`${r}.flee`] = String(Math.round(k.flee * 100));
-  }
-  for (const [k, v] of Object.entries({ ...base, ...over })) if (v !== null) fd.set(k, v);
-  return fd;
-};
-eq("the admin form: today's numbers read back as the defaults", rulesFromForm(ruleForm()).rules, DEFAULT_RULES);
-eq("…switched off when the switch isn't sent", rulesFromForm(ruleForm({ on: null })).rules?.on, false);
-eq(
-  "…percents become fractions, minutes stay minutes",
-  (({ chance, gapMinutes, stayMinutes, kinds }) => [chance, gapMinutes, stayMinutes, kinds.superRare.catchRate, kinds.superRare.flee])(
-    rulesFromForm(ruleForm({ chance: "100", gapMinutes: "1", stayMinutes: "10", "superRare.catchRate": "50", "superRare.flee": "0" })).rules!,
-  ),
-  [1, 1, 10, 0.5, 0],
-);
-eq(
-  "…numbers out of range, or not whole, are refused by name",
-  rulesFromForm(ruleForm({ chance: "0", "rare.weight": "abc", "superRare.flee": "51", "common.minLevel": "2.5", stayMinutes: "" })).errors,
-  {
-    chance: "From 1 to 100 %.",
-    stayMinutes: "A whole number from 1 to 30.",
-    "common.minLevel": "A whole number from 1 to 10.",
-    "rare.weight": "A whole number from 0 to 1000.",
-    "superRare.flee": "From 0 to 50 %.",
-  },
-);
-eq(
-  "…and so is every kind set to never",
-  rulesFromForm(ruleForm({ "common.weight": "0", "uncommon.weight": "0", "rare.weight": "0", "superRare.weight": "0" })).errors,
-  { form: "Give at least one kind a chance to turn up, or switch wild pandas off instead." },
-);
-eq("shares at the top level: 58/28/11/3 %", Object.values(sharesAt(10, DEFAULT_KINDS)).map((s) => Math.round(s * 100)), [58, 28, 11, 3]);
-eq("…at level 1, all common", Object.values(sharesAt(1, DEFAULT_KINDS)), [1, 0, 0, 0]);
-const goldOnly = { ...DEFAULT_KINDS, common: { ...DEFAULT_KINDS.common, weight: 0 }, uncommon: { ...DEFAULT_KINDS.uncommon, weight: 0 }, rare: { ...DEFAULT_KINDS.rare, weight: 0 }, superRare: { ...DEFAULT_KINDS.superRare, minLevel: 1, levelBonus: 4 } };
-eq("kinds set to never don't turn up; the rest from their own level", [raritiesAt(10, goldOnly).join(), pickRarity(1, Math.random, goldOnly), firstLevel(goldOnly)], ["superRare", "superRare", 1]);
-eq("…with their own level above yours", rollWild(2, always(0.5), goldOnly)?.level, 2 + 0 + 4);
-eq("the first level anyone meets one", [firstLevel(DEFAULT_KINDS), firstLevel({ ...DEFAULT_KINDS, common: { ...DEFAULT_KINDS.common, weight: 0 } })], [1, 3]);
-eq("how far apart they turn up", [apartText(DEFAULT_RULES), apartText({ chance: 1, gapMinutes: 1 }), apartText({ chance: 0.05, gapMinutes: 10 })], ["about one every 6½ minutes", "about one every 1 minute", "about one every 3½ hours"]);
-eq("what browsers are told", openingsOf({ ...DEFAULT_RULES, on: false, kinds: goldOnly }), { on: false, stayMinutes: 3, from: { common: null, uncommon: null, rare: null, superRare: 1 } });
-eq(
-  "levelling up follows the rules: the first level they meet one, and new kinds",
-  [levelUp(3, { common: 3, uncommon: 3, rare: 5, superRare: null }), levelUp(5, { common: 1, uncommon: 3, rare: null, superRare: 5 }), levelUp(7, { common: 1, uncommon: 3, rare: 5, superRare: null })],
-  ["Level 3! Wild pandas can find your drawings now.", "Level 5! Super rare pandas can turn up now.", "Level 7!"],
-);
-{
-  const easy = startBattle({ team: [mochi, bao], wild: pip, yourLevel: 3, bamboo: 4, rates: { catchRate: 0.9, flee: 0 } });
-  const usual = startBattle({ team: [mochi, bao], wild: pip, yourLevel: 3, bamboo: 4 });
-  eq("a battle keeps the rates it started with (its rarity's by default)", [easy.state.rates, usual.state.rates], [{ catchRate: 0.9, flee: 0 }, { catchRate: 0.38, flee: 0.06 }]);
-  const tired = (s: BattleState): BattleState => ({ ...s, wild: { ...s.wild, hp: 5 } });
-  eq("…and bamboo works by them", viewOf(tired(easy.state)).chance > viewOf(tired(usual.state)).chance, true);
-  const legacy = { ...usual.state, rates: undefined };
-  eq("battles from before keep their rarity's numbers", ratesOf(legacy), { catchRate: 0.38, flee: 0.06 });
-  // Your buddies at level 10, so staring it down for a while wears nobody out.
-  const runner = startBattle({ team: [mochi, bao], wild: pip, yourLevel: 10, bamboo: 4, rates: { catchRate: 0.38, flee: 1 } }).state;
-  let s = runner;
-  for (let i = 0; i < 2 && !s.over && !s.mustSwitch; i++) s = act(s, { type: "move", move: "stare" }, always(0.5)).state;
-  eq("one set to always run off goes at the end of turn two", [s.turn, s.over], [2, "fled"]);
-  let calm = startBattle({ team: [mochi, bao], wild: pip, yourLevel: 10, bamboo: 4, rates: { catchRate: 0.38, flee: 0 } }).state;
-  for (let i = 0; i < 6 && !calm.over && !calm.mustSwitch; i++) calm = act(calm, { type: "move", move: "stare" }, seeded(40 + i)).state;
-  eq("…and one set to never doesn't", [calm.turn >= 3, calm.over === "fled"], [true, false]);
-}
-
-// ------------------------------------------------------------ pandas keeping off the drawing
-{
-  const room = { x: 0, y: 100, w: 1000, h: 500 };
-  const body = { hw: 25, h: 66 };
-  // A wall down the middle with a gap near the bottom, and a box.
-  const wall: CanvasElement = { id: crypto.randomUUID(), type: "rect", color: "#201f24", size: 2, fill: null, x: 480, y: 0, w: 40, h: 480 };
-  const box: CanvasElement = { id: crypto.randomUUID(), type: "rect", color: "#201f24", size: 2, fill: null, x: 100, y: 250, w: 200, h: 150 };
-  const obstacles = obstaclesOf([wall, box]);
-  const g = buildGrid(room, obstacles, body, 20, 6);
-  eq("a spot over the box is blocked, clear paper isn't", [isFree(g, { x: 200, y: 360 }), isFree(g, { x: 800, y: 300 })], [false, true]);
-  eq("standing just under the box counts as on it (its body rises over it)", touchesDrawing({ x: 200, y: 420 }, body, obstacles), true);
-  eq("…but well below it doesn't", touchesDrawing({ x: 200, y: 520 }, body, obstacles), false);
-  const from = { x: 360, y: 200 };
-  const to = { x: 800, y: 200 };
-  eq("a straight walk through the wall isn't clear", clearLine(g, from, to), false);
-  const path = findPath(g, from, to);
-  const blockedOnWay = path ? !pathClear(g, path) : true;
-  eq("the way round goes through the gap, never over anything", [!!path, blockedOnWay, path?.some((p) => p.y > 480 + body.h)], [true, false, true]);
-  // Every point along the way keeps the whole panda off both shapes.
-  let touching = 0;
-  if (path) {
-    for (let i = 1; i < path.length; i++) {
-      for (let k = 0; k <= 20; k++) {
-        const p = { x: path[i - 1].x + ((path[i].x - path[i - 1].x) * k) / 20, y: path[i - 1].y + ((path[i].y - path[i - 1].y) * k) / 20 };
-        if (touchesDrawing(p, body, obstacles)) touching++;
-      }
-    }
-  }
-  eq("…checked every step of the way", touching, 0);
-  eq("it's straightened (only turns where it must)", (path?.length ?? 99) <= 5, true);
-  eq("a blocked spot can't be a destination", findPath(g, from, { x: 500, y: 200 }), null);
-  const near = nearestFree(g, { x: 200, y: 330 });
-  eq("the nearest clear spot to one on the box is off it", !!near && !touchesDrawing(near, body, obstacles), true);
-  const sealed = buildGrid(room, obstaclesOf([{ ...wall, id: crypto.randomUUID(), y: 0, h: 700 }]), body, 20, 6);
-  eq("with no gap, there's no way across", findPath(sealed, from, to), null);
-  eq("free spots and edge spots are on clear paper", [freeSpots(g).every((p) => isFree(g, p)), edgeSpots(g, "left").length > 0], [true, true]);
-  // A long scribble is cut into pieces: the space it curls round stays walkable.
-  const loop: number[] = [];
-  for (let a = 0; a <= Math.PI * 2 + 0.01; a += 0.1) loop.push(700 + Math.cos(a) * 200, 350 + Math.sin(a) * 200);
-  const scribble: CanvasElement = { id: crypto.randomUUID(), type: "stroke", color: "#201f24", size: 4, points: loop };
-  const pieces = obstaclesOf([scribble]);
-  eq("a pen stroke becomes many small pieces", pieces.length > 15 && pieces.every((p) => p.w < 80 && p.h < 80), true);
-  eq("…so the middle of a drawn circle is clear", touchesDrawing({ x: 700, y: 380 }, body, pieces), false);
-  eq("erasers aren't obstacles", obstaclesOf([{ id: crypto.randomUUID(), type: "eraser", size: 20, points: [0, 0, 500, 500] }]).length, 0);
-}
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);

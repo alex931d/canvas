@@ -40,8 +40,6 @@ export type SessionUser = {
   role: Role;
   /** Their profile picture, or null to show initials (src/lib/profile/avatar.ts). */
   avatarUrl: string | null;
-  /** Their study level, as kept on their record (users.level). */
-  level: number;
 };
 export type CurrentSession = { id: string; userId: string; createdAt: Date; lastVerifiedAt: Date };
 type ValidationResult =
@@ -87,7 +85,6 @@ export async function validateSessionToken(token: string): Promise<ValidationRes
       emailVerified: users.emailVerified,
       role: users.role,
       avatarUpdatedAt: users.avatarUpdatedAt,
-      level: users.level,
     })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
@@ -120,7 +117,6 @@ export async function validateSessionToken(token: string): Promise<ValidationRes
       emailVerified: row.emailVerified,
       role: row.role,
       avatarUrl: avatarUrl(row.userId, row.avatarUpdatedAt),
-      level: row.level,
     },
   };
 }

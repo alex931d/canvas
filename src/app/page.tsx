@@ -1,25 +1,16 @@
-import { GalleryVerticalEnd, LayoutGrid, PawPrint } from "lucide-react";
+import { GalleryVerticalEnd, LayoutGrid } from "lucide-react";
 import { Suspense } from "react";
 import { StaffSidebarLink } from "@/components/admin/staff-sidebar-link";
 import { AppSidebar, SidebarLink } from "@/components/app-sidebar";
 import { NewDrawingButton } from "@/components/gallery/new-drawing-button";
 import { Overview, OverviewSkeleton } from "@/components/gallery/overview";
 import { HeaderUserMenu, SidebarUserMenu } from "@/components/user-menu";
-import { StudyBuddies } from "@/components/buddy/study-buddies";
 import { requireUser } from "@/lib/auth/session";
-import { getMembership } from "@/lib/billing/membership";
 
 /** Reads the session, so each use sits in its own Suspense boundary. */
 async function SidebarUser() {
   const user = await requireUser();
-  const { isMember } = await getMembership(user.id);
-  return (
-    <>
-      <SidebarUserMenu user={user} />
-      {/* Floats over the page (through a portal); members only. */}
-      {isMember ? <StudyBuddies /> : null}
-    </>
-  );
+  return <SidebarUserMenu user={user} />;
 }
 
 async function HeaderUser() {
@@ -39,7 +30,6 @@ export default function Home() {
       >
         <SidebarLink href="/" icon={<LayoutGrid />} label="Drawings" active />
         <SidebarLink href="/study" icon={<GalleryVerticalEnd />} label="Study" />
-        <SidebarLink href="/buddies" icon={<PawPrint />} label="Buddies" />
         <Suspense fallback={null}>
           <StaffSidebarLink />
         </Suspense>

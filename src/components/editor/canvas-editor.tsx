@@ -20,11 +20,8 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useEffectEvent, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { renameDrawing } from "@/app/actions";
 import { AppSidebar, SidebarButton, SidebarSeparator } from "@/components/app-sidebar";
-import { StudyBuddies } from "@/components/buddy/study-buddies";
 import { Badge, Button, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Tip, toast } from "@/components/kit";
 import { SidebarUserMenu, type MenuUser } from "@/components/user-menu";
-import { emitBuddy } from "@/lib/buddy/events";
-import { finishedCards } from "@/lib/canvas/kanban";
 import { mathCheckSchema, type MathCheck } from "@/lib/ai/math-check-schema";
 import { AssetCache, inspectGif } from "@/lib/canvas/images";
 import { exportRegion, makeThumbnail, renderRegion, type RenderEnv } from "@/lib/canvas/render";
@@ -123,19 +120,8 @@ export function CanvasEditor({
   const [clientId] = useState(newClientId);
   const [doc] = useState(() => new CollabDoc({ elements: initialData.elements, version: initialVersion }));
 
-  /** Every edit from the board. To-do cards moved to Done make the study buddies cheer. */
-  const dispatch = useCallback(
-    (action: HistoryAction) => {
-      if (action.type === "update" && action.elements.some((e) => e.type === "kanban")) {
-        const before = doc.elements;
-        const changed = new Map(action.elements.map((e) => [e.id, e]));
-        const done = finishedCards(before, before.map((e) => changed.get(e.id) ?? e)).length;
-        if (done > 0) emitBuddy({ kind: "task", count: done });
-      }
-      doc.dispatch(action);
-    },
-    [doc],
-  );
+  /** Every edit from the board. */
+  const dispatch = useCallback((action: HistoryAction) => doc.dispatch(action), [doc]);
   const snap = useSyncExternalStore(doc.subscribe, doc.getSnapshot, doc.getSnapshot);
   const elements = snap.elements;
 
@@ -594,7 +580,6 @@ export function CanvasEditor({
           </>
         )}
       </AppSidebar>
-      <StudyBuddies />
 
       <main className="flex h-dvh min-w-0 flex-1 flex-col gap-4 px-3 pt-3 pb-[76px] md:px-8 md:pt-6 md:pb-6">
         <header className="flex items-center gap-2 md:gap-3">
@@ -712,8 +697,7 @@ export function CanvasEditor({
           </div>
         ) : null}
 
-        {/* data-buddy-area: where study buddies may roam and wild pandas turn up. */}
-        <div data-buddy-area className="relative min-h-0 flex-1 overflow-hidden rounded-xl bg-card">
+        <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl bg-card">
           <Board
             ref={boardRef}
             drawingId={id}

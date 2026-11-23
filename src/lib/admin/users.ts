@@ -123,7 +123,6 @@ export async function userDetail(id: string) {
       emailVerified: users.emailVerified,
       stripeCustomerId: users.stripeCustomerId,
       avatarUpdatedAt: users.avatarUpdatedAt,
-      level: users.level,
       createdAt: users.createdAt,
       lastActiveAt: lastActive,
       sessionCount: sql<number>`(select count(*) from ${sessions} se where se.user_id = ${USER_ID})`.mapWith(Number),

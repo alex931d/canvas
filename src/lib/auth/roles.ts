@@ -25,7 +25,7 @@ export const ROLE_INFO: Record<Role, { label: string; description: string }> = {
   admin: {
     label: "Admin",
     description:
-      "Everything support can do, for every account, plus changing emails and roles, the site's seasonal theme and how wild pandas turn up.",
+      "Everything support can do, for every account, plus changing emails and roles and the site's seasonal theme.",
   },
 };
 
@@ -40,7 +40,7 @@ const PERMISSIONS = {
   "users:email": ["admin"],
   /** Change roles, and edit staff (support and admin) accounts. */
   "users:roles": ["admin"],
-  /** Site-wide settings: the seasonal theme and the wild pandas' rules. */
+  /** Site-wide settings, like the seasonal theme. */
   "site:settings": ["admin"],
 } as const satisfies Record<string, readonly Role[]>;
 

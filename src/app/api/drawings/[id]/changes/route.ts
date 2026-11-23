@@ -3,8 +3,6 @@ import { z } from "zod";
 import { db } from "@/db";
 import { drawingChanges, drawingMembers, drawings } from "@/db/schema";
 import { limiters } from "@/lib/auth/rate-limit";
-import { recordEvents } from "@/lib/buddy/progress";
-import { finishedCards } from "@/lib/canvas/kanban";
 import { drawingDataSchema, normalizeDrawing } from "@/lib/canvas/schema";
 import { applyOps, batchSchema } from "@/lib/collab/ops";
 import { notify } from "@/lib/collab/notify";
@@ -124,12 +122,6 @@ export async function POST(request: Request, ctx: RouteContext<"/api/drawings/[i
 
       await tx.update(drawings).set({ data: data.data, version }).where(eq(drawings.id, id));
       await tx.insert(drawingChanges).values(rows);
-      // For the study buddies: to-do cards this person just moved to Done.
-      await recordEvents(
-        tx,
-        user.id,
-        finishedCards(current.elements, elements).map((cardId) => ({ kind: "task", ref: `${id}:${cardId}` })),
-      );
       await notify({ t: "change", d: id }, tx);
       if (Math.floor(version / 100) !== Math.floor((version - rows.length) / 100)) {
         await tx

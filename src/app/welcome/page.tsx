@@ -8,7 +8,6 @@ import { Button, Kbd } from "@/components/kit";
 import { MEMBERSHIP, MEMBERSHIP_INCLUDES } from "@/lib/billing/plan";
 import { Reveal } from "@/components/motion/reveal";
 import { cn } from "@/lib/utils";
-import { Panda } from "@/components/buddy/panda";
 import { SeasonalBoardDecor, SeasonalEffects } from "@/components/seasonal/site-decor";
 import {
   DOT_GRID,
@@ -73,10 +72,6 @@ const TOGETHER = [
   {
     title: "Flashcards from your notes",
     text: "Select part of a drawing and choose Flashcard: your work becomes the answer. Each card comes back just before you'd forget it, sooner if you didn't know it.",
-  },
-  {
-    title: "Study buddies",
-    text: "Little pandas keep you company and keep count. They cheer when you reach your daily goal or finish a to-do card, nap when you stop, and dress up as you level up. Study enough and wild pandas, some of them rare, wander onto your drawings: battle one and offer bamboo to keep it.",
   },
 ];
 
@@ -157,12 +152,6 @@ function TogetherScene() {
       </svg>
       <Cursor name="Alex" color="#c94736" className="top-[250px] left-[40%] sm:top-[300px] sm:left-[30%]" />
 
-      <div className="absolute right-[318px] bottom-9 z-10 hidden w-16 sm:block">
-        <span className="absolute bottom-[calc(100%+6px)] left-1/2 w-max -translate-x-1/2 rounded-xl bg-white px-3 py-1.5 text-[13px] font-semibold text-grey-900 shadow-float ring-1 ring-grey-900/10">
-          4 days in a row!
-        </span>
-        <Panda color="#c94736" accessories={["scarf", "glasses"]} />
-      </div>
       <div className="relative mt-8 ml-auto w-full max-w-[270px] rounded-xl bg-white p-4 shadow-float ring-1 ring-grey-900/5 sm:absolute sm:right-8 sm:bottom-8 sm:mt-0 sm:w-[270px]">
         <p className="text-xs text-grey-500">Flashcard</p>
         <p className="mt-1 text-[15px] leading-snug font-bold">Balance the rusting of iron</p>

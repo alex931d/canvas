@@ -1,10 +1,9 @@
-import { ArrowLeft, ArrowRight, GalleryVerticalEnd, LayoutGrid, PawPrint, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ArrowRight, GalleryVerticalEnd, LayoutGrid, ShieldCheck } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { SeasonalThemeForm } from "@/components/admin/seasonal-theme-form";
-import { WildRulesForm } from "@/components/admin/wild-rules-form";
 import { AdminToolbar } from "@/components/admin/toolbar";
 import {
   ComplimentaryButton,
@@ -24,7 +23,7 @@ import { PAGE_SIZE, searchUsers, userDetail, userStats, type MembershipLabel, ty
 import { can, canManage, roleChangeBlocked, ROLE_INFO, type Role } from "@/lib/auth/roles";
 import { requirePermission, type SessionUser } from "@/lib/auth/session";
 import { THEME_INFO } from "@/lib/seasons";
-import { readSeasonalSetting, readWildSetting } from "@/lib/site/settings";
+import { readSeasonalSetting } from "@/lib/site/settings";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Admin", robots: { index: false } };
@@ -59,13 +58,11 @@ function DashboardSkeleton() {
 async function Dashboard({ searchParams }: { searchParams: PageProps<"/admin">["searchParams"] }) {
   const actor = await requirePermission("admin:open");
   const query = parseAdminQuery(await searchParams);
-  const siteSettings = can(actor.role, "site:settings");
-  const [stats, results, detail, seasonal, wild] = await Promise.all([
+  const [stats, results, detail, seasonal] = await Promise.all([
     userStats(),
     searchUsers(query),
     query.user ? userDetail(query.user) : null,
-    siteSettings ? readSeasonalSetting() : null,
-    siteSettings ? readWildSetting() : null,
+    can(actor.role, "site:settings") ? readSeasonalSetting() : null,
   ]);
   // Past the last page (say, after a search narrowed things): show the last one, and say so in the address.
   if (query.page > results.pageCount) redirect(adminHref(query, { page: results.pageCount }));
@@ -78,7 +75,6 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/admin">["
       <AppSidebar footer={<SidebarUserMenu user={actor} />}>
         <SidebarLink href="/" icon={<LayoutGrid />} label="Drawings" />
         <SidebarLink href="/study" icon={<GalleryVerticalEnd />} label="Study" />
-        <SidebarLink href="/buddies" icon={<PawPrint />} label="Buddies" />
         <SidebarLink href="/admin" icon={<ShieldCheck />} label="Admin" active />
       </AppSidebar>
 
@@ -131,31 +127,6 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/admin">["
                     </>
                   ) : (
                     "Never changed: following the calendar."
-                  )
-                }
-              />
-            </section>
-          ) : null}
-
-          {wild ? (
-            <section aria-labelledby="wild-title" className="mt-8 rounded-xl bg-white p-4 sm:p-6">
-              <h2 id="wild-title" className="text-xl font-bold">
-                Wild pandas
-              </h2>
-              <p className="mt-2 mb-5 max-w-[46rem] text-sm leading-relaxed text-grey-500">
-                How often wild pandas wander onto members&apos; drawings, which kinds turn up at which study level, and
-                how hard they are to catch. Members can still switch them off for themselves in their buddy settings.
-              </p>
-              <WildRulesForm
-                rules={wild.rules}
-                changed={
-                  wild.updatedAt ? (
-                    <>
-                      Last changed by {wild.updatedByName ?? "a deleted account"} on{" "}
-                      <LocalDate iso={wild.updatedAt.toISOString()} />.
-                    </>
-                  ) : (
-                    "Never changed: the defaults."
                   )
                 }
               />
@@ -430,7 +401,7 @@ function UserPanel({ actor, user }: { actor: SessionUser; user: UserDetail }) {
         </span>
       </div>
       <p className="px-1 text-sm text-grey-500">
-        Joined <LocalDate iso={user.createdAt.toISOString()} />. Study level {user.level}.{" "}
+        Joined <LocalDate iso={user.createdAt.toISOString()} />.{" "}
         {user.lastActiveAt ? (
           <>
             Last active <LocalTime iso={user.lastActiveAt.toISOString()} />.

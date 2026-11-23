@@ -1,7 +1,5 @@
 import { sql } from "drizzle-orm";
 import type { Role } from "@/lib/auth/roles";
-import type { Outcome } from "@/lib/buddy/battle";
-import type { Ability, Rarity } from "@/lib/buddy/kinds";
 import {
   bigint,
   boolean,
@@ -59,9 +57,8 @@ export const users = pgTable(
      */
     avatarUpdatedAt: timestamp("avatar_updated_at", { withTimezone: true }),
     /**
-     * Their study level: what the points from their study_events add up to
-     * (LEVELS in src/lib/buddy/shared.ts). Brought up to date whenever they
-     * study, and whenever their progress is read (src/lib/buddy/progress.ts).
+     * Their study level, for the study buddies on the dev branch (unused
+     * here; see "Study buddies' tables" below).
      */
     level: integer("level").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -400,15 +397,18 @@ export type Drawing = typeof drawings.$inferSelect;
 export type NewDrawing = typeof drawings.$inferInsert;
 export type Asset = typeof assets.$inferSelect;
 
-/**
- * Study buddies (src/lib/buddy): one row per person once they change
- * anything; until then the defaults apply.
+/*
+ * Study buddies' tables. The study buddies themselves live on the dev
+ * branch; their tables and migrations stay here, unused, so every branch
+ * shares one migration history and one database (a migration missing from
+ * one branch would be skipped, or dropped, when they meet again).
  */
+
+/** Study buddies' settings: one row per person once they change anything. */
 export const buddySettings = pgTable("buddy_settings", {
   userId: uuid("user_id")
     .primaryKey()
     .references(() => users.id, { onDelete: "cascade" }),
-  /** BuddySettings (src/lib/buddy/shared.ts). */
   settings: jsonb("settings").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
@@ -417,9 +417,7 @@ export const buddySettings = pgTable("buddy_settings", {
 }).enableRLS();
 
 /**
- * Pandas caught in battles: yours for good. The server decided their rarity
- * and trick when they turned up (src/lib/buddy/wild.ts), so nobody can make
- * themselves a super rare one by editing their settings.
+ * Pandas caught in battles: yours for good.
  */
 export const buddyCollection = pgTable(
   "buddy_collection",
@@ -429,8 +427,8 @@ export const buddyCollection = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    rarity: text("rarity").$type<Rarity>().notNull(),
-    ability: text("ability").$type<Ability>().notNull(),
+    rarity: text("rarity").notNull(),
+    ability: text("ability").notNull(),
     /** Its level when it was caught. */
     level: integer("level").notNull(),
     caughtAt: timestamp("caught_at", { withTimezone: true }).notNull().defaultNow(),
@@ -440,8 +438,7 @@ export const buddyCollection = pgTable(
 
 /**
  * Wild pandas: at most one around per person at a time, gone after a few
- * minutes. A battle's state (BattleState in src/lib/buddy/battle.ts) lives
- * here while it lasts, and stays with how it ended.
+ * minutes. A battle's state lives here while it lasts.
  */
 export const buddyEncounters = pgTable(
   "buddy_encounters",
@@ -451,11 +448,11 @@ export const buddyEncounters = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    rarity: text("rarity").$type<Rarity>().notNull(),
-    ability: text("ability").$type<Ability>().notNull(),
+    rarity: text("rarity").notNull(),
+    ability: text("ability").notNull(),
     level: integer("level").notNull(),
     /** wild: wandering about; battle: in one; then how it ended, or gone (it wandered off). */
-    status: text("status").$type<"wild" | "battle" | "gone" | Outcome>().notNull().default("wild"),
+    status: text("status").notNull().default("wild"),
     state: jsonb("state"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     /** It wanders off then, unless a battle started. */

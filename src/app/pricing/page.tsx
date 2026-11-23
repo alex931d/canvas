@@ -209,7 +209,7 @@ function StepList({ done }: { done: number }) {
 const QUESTIONS = [
   {
     q: "What do I get?",
-    a: "Everything in canvas: unlimited drawings, math checks, equations and graphs, the chemistry tools, flashcards, to-do boards, study buddies and drawing live with other members. There's only one plan.",
+    a: "Everything in canvas: unlimited drawings, math checks, equations and graphs, the chemistry tools, flashcards, to-do boards and drawing live with other members. There's only one plan.",
   },
   {
     q: "How do I pay?",

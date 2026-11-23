@@ -1,15 +1,13 @@
 "use client";
 
-import { CreditCard, LogOut, PawPrint, Settings, ShieldCheck, Sparkles } from "lucide-react";
+import { CreditCard, LogOut, Settings, ShieldCheck, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { Avatar, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, toast } from "@/components/kit";
 import { signOut } from "@/app/(auth)/actions";
 import { useSidebarCollapsed } from "@/components/app-sidebar";
 import { setDecorationsHidden, useSeasonState } from "@/components/seasonal/season-context";
 import { can, type Role } from "@/lib/auth/roles";
-import { emitBuddy } from "@/lib/buddy/events";
 import { THEME_INFO } from "@/lib/seasons";
 import { clearLocalDataOnSignOut } from "@/lib/local-store/sign-out";
 import { cn } from "@/lib/utils";
@@ -45,7 +43,6 @@ function AccountMenuContent({
   side: "top" | "bottom";
 }) {
   const season = useSeasonState();
-  const router = useRouter();
   return (
     <MenuContent side={side} align={side === "top" ? "start" : "end"} className="w-64">
       <MenuLabel>
@@ -53,10 +50,6 @@ function AccountMenuContent({
         <span className="block truncate text-xs text-muted-foreground">{user.email}</span>
       </MenuLabel>
       <MenuSeparator />
-      {/* Buddy settings where the pandas are out; elsewhere, the buddies page. */}
-      <MenuItem onSelect={() => (emitBuddy({ kind: "open-settings" }) ? undefined : router.push("/buddies"))}>
-        <PawPrint /> Study buddies
-      </MenuItem>
       {season.theme ? (
         <MenuItem onSelect={() => setDecorationsHidden(!season.hidden)}>
           <Sparkles /> {season.hidden ? "Show" : "Hide"} {THEME_INFO[season.theme].label} decorations

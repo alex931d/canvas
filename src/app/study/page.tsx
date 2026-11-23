@@ -1,10 +1,9 @@
-import { GalleryVerticalEnd, LayoutGrid, PawPrint } from "lucide-react";
+import { GalleryVerticalEnd, LayoutGrid } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { StaffSidebarLink } from "@/components/admin/staff-sidebar-link";
 import { AppSidebar, SidebarLink } from "@/components/app-sidebar";
-import { StudyBuddies } from "@/components/buddy/study-buddies";
 import { CardList } from "@/components/study/card-list";
 import { StudySession } from "@/components/study/study-session";
 import { Skeleton } from "@/components/kit";
@@ -18,13 +17,7 @@ export const metadata: Metadata = { title: "Study" };
 
 async function SidebarUser() {
   const user = await requireMember();
-  return (
-    <>
-      <SidebarUserMenu user={user} />
-      {/* Floats over the page (through a portal). */}
-      <StudyBuddies />
-    </>
-  );
+  return <SidebarUserMenu user={user} />;
 }
 
 async function HeaderUser() {
@@ -45,7 +38,6 @@ export default function StudyPage({ searchParams }: PageProps<"/study">) {
       >
         <SidebarLink href="/" icon={<LayoutGrid />} label="Drawings" />
         <SidebarLink href="/study" icon={<GalleryVerticalEnd />} label="Study" active />
-        <SidebarLink href="/buddies" icon={<PawPrint />} label="Buddies" />
         <Suspense fallback={null}>
           <StaffSidebarLink />
         </Suspense>
