@@ -7,6 +7,7 @@ import { AppSidebar, SidebarLink } from "@/components/app-sidebar";
 import { CardList } from "@/components/study/card-list";
 import { StudySession } from "@/components/study/study-session";
 import { Skeleton } from "@/components/kit";
+import { HeaderUserSlot } from "@/components/header-user-slot";
 import { HeaderUserMenu, SidebarUserMenu } from "@/components/user-menu";
 import { requireMember } from "@/lib/billing/membership";
 import { allCards, dueCards, listDecks } from "@/lib/study/cards";
@@ -47,7 +48,7 @@ export default function StudyPage({ searchParams }: PageProps<"/study">) {
         <div className="mx-auto w-full max-w-[880px]">
           <header className="mb-8 flex items-center justify-between gap-4">
             <h1 className="text-[32px] leading-tight font-bold">Study</h1>
-            <Suspense fallback={null}>
+            <Suspense fallback={<HeaderUserSlot />}>
               <HeaderUser />
             </Suspense>
           </header>

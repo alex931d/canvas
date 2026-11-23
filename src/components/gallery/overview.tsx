@@ -5,8 +5,12 @@ import { Skeleton } from "@/components/kit";
 import { Reveal } from "@/components/motion/reveal";
 import { listDrawings, listSharedWithMe } from "@/lib/drawings";
 import { studySummary } from "@/lib/study/cards";
+import { cn } from "@/lib/utils";
 import { DrawingMenu } from "./drawing-menu";
 import { NewDrawingButton } from "./new-drawing-button";
+
+const STAT = "flex min-h-[88px] flex-col justify-between gap-2 rounded-xl p-3 sm:min-h-0 sm:justify-start sm:gap-3 sm:p-6";
+const STAT_NUMBER = "text-2xl leading-none font-bold sm:text-[32px]";
 
 /** Summary cards, your drawings, and drawings shared with you. */
 export async function Overview() {
@@ -14,29 +18,33 @@ export async function Overview() {
 
   return (
     <>
-      <section aria-label="Summary" className="mb-8 grid gap-3 sm:grid-cols-3 md:gap-6">
-        <div className="rounded-xl bg-grey-900 p-6 text-white">
-          <p className="text-sm">Drawings</p>
-          <p className="mt-3 text-[32px] leading-none font-bold" data-testid="drawing-count">
+      {/* Phones: three small tiles in a row, so the drawings start near the top. */}
+      <section aria-label="Summary" className="mb-6 grid grid-cols-3 gap-2 sm:mb-8 sm:gap-3 md:gap-6">
+        <div className={cn(STAT, "bg-grey-900 text-white")}>
+          <p className="text-xs sm:text-sm">Drawings</p>
+          <p className={STAT_NUMBER} data-testid="drawing-count">
             {drawings.length}
           </p>
         </div>
-        <div className="rounded-xl bg-card p-6">
-          <p className="text-sm text-muted-foreground">Shared with you</p>
-          <p className="mt-3 text-[32px] leading-none font-bold" data-testid="shared-count">
+        <div className={cn(STAT, "bg-card")}>
+          <p className="text-xs text-muted-foreground sm:text-sm">Shared with you</p>
+          <p className={STAT_NUMBER} data-testid="shared-count">
             {shared.length}
           </p>
         </div>
         <Link
           href="/study"
-          className="group rounded-xl bg-card p-6 outline-none transition-shadow hover:ring-2 hover:ring-green/40 focus-visible:ring-2 focus-visible:ring-ring"
+          className={cn(
+            STAT,
+            "group bg-card outline-none transition-shadow hover:ring-2 hover:ring-green/40 focus-visible:ring-2 focus-visible:ring-ring",
+          )}
         >
-          <p className="text-sm text-muted-foreground">Flashcards due</p>
-          <p className="mt-3 flex items-baseline justify-between gap-2">
-            <span className="text-[32px] leading-none font-bold" data-testid="due-count">
+          <p className="text-xs text-muted-foreground sm:text-sm">Flashcards due</p>
+          <p className="flex items-baseline justify-between gap-2">
+            <span className={STAT_NUMBER} data-testid="due-count">
               {study.due}
             </span>
-            <span className="text-sm font-bold text-green group-hover:underline">
+            <span className="text-sm font-bold text-green group-hover:underline max-sm:hidden">
               {study.total === 0 ? "How it works" : study.due > 0 ? "Study now" : "All done"}
             </span>
           </p>
@@ -170,10 +178,11 @@ function DrawingCard({
 export function OverviewSkeleton() {
   return (
     <>
-      <div className="mb-8 grid gap-3 sm:grid-cols-3 md:gap-6">
-        <Skeleton className="h-[118px] rounded-xl bg-grey-900/80" />
-        <Skeleton className="h-[118px] rounded-xl bg-card" />
-        <Skeleton className="h-[118px] rounded-xl bg-card" />
+      {/* The same sizes as the tiles, so nothing moves when they arrive. */}
+      <div className="mb-6 grid grid-cols-3 gap-2 sm:mb-8 sm:gap-3 md:gap-6">
+        <Skeleton className="h-[88px] rounded-xl bg-grey-900/80 sm:h-28" />
+        <Skeleton className="h-[88px] rounded-xl bg-card sm:h-28" />
+        <Skeleton className="h-[88px] rounded-xl bg-card sm:h-28" />
       </div>
       <Skeleton className="h-80 rounded-xl bg-card" />
     </>

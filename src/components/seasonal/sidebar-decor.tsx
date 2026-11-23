@@ -22,7 +22,7 @@ export function SidebarSeason({ theme, motion }: { theme: Theme; motion: boolean
       data-season-decor={theme}
       className="pointer-events-none absolute inset-0 hidden overflow-hidden rounded-[inherit] md:block"
     >
-      <span className="absolute top-7 right-5 group-data-[collapsed=true]/sidebar:hidden short:top-4">
+      <span className="absolute top-7 right-5 rail:hidden short:top-4">
         {theme === "christmas" ? <CandyCanePair className="h-12 w-auto" /> : null}
         {theme === "halloween" ? <JackOLantern className="h-9 w-auto" /> : null}
         {theme === "easter" ? (

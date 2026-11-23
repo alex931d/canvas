@@ -7,5 +7,7 @@ import { getCurrentSession } from "@/lib/auth/session";
 export async function StaffSidebarLink() {
   const { user } = await getCurrentSession();
   if (!user || !can(user.role, "admin:open")) return null;
-  return <SidebarLink href="/admin" icon={<ShieldCheck />} label="Admin" />;
+  // Not in the phones' bottom bar: it would arrive after the other tabs (it waits for the
+  // session) and push them aside. Staff reach it from the account menu there.
+  return <SidebarLink href="/admin" icon={<ShieldCheck />} label="Admin" wideOnly />;
 }

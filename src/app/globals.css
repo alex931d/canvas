@@ -4,6 +4,22 @@
 /* Desktop sidebar on laptop-height screens: tighten the vertical rhythm. */
 @custom-variant short (@media (min-width: 48rem) and (max-height: 940px));
 @custom-variant shorter (@media (min-width: 48rem) and (max-height: 820px));
+/*
+ * The menu as a rail of icons: always on tablets (48–64rem), and on bigger
+ * screens once minimized. The minimized choice is put on <html> before the
+ * first paint (src/app/layout.tsx), so a page never opens with the full menu
+ * and then slides narrow.
+ */
+@custom-variant rail {
+  @media (width >= 48rem) and (width < 64rem) {
+    @slot;
+  }
+  @media (width >= 64rem) {
+    &:where([data-sidebar="collapsed"] *) {
+      @slot;
+    }
+  }
+}
 
 /*
  * Warm-beige dashboard palette: beige page, flat white cards, near-black

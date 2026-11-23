@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useTransition } from "react";
 import { Avatar, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, toast } from "@/components/kit";
 import { signOut } from "@/app/(auth)/actions";
-import { useSidebarCollapsed } from "@/components/app-sidebar";
 import { setDecorationsHidden, useSeasonState } from "@/components/seasonal/season-context";
 import { can, type Role } from "@/lib/auth/roles";
 import { THEME_INFO } from "@/lib/seasons";
@@ -81,21 +80,18 @@ function AccountMenuContent({
 
 /** Account button at the bottom of the dark sidebar. */
 export function SidebarUserMenu({ user }: { user: MenuUser }) {
-  const collapsed = useSidebarCollapsed();
   const { pending, run } = useSignOut(user);
   return (
     <Menu>
       <MenuTrigger
         aria-label={`Account: ${user.name}`}
-        className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-white outline-none hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-green group-data-[collapsed=true]/sidebar:mx-auto group-data-[collapsed=true]/sidebar:w-auto group-data-[collapsed=true]/sidebar:px-2"
+        className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-white outline-none hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-green rail:mx-auto rail:w-auto rail:px-2"
       >
         <Avatar name={user.name} src={user.avatarUrl} />
-        {collapsed ? null : (
-          <span className="min-w-0">
-            <span className="block truncate text-sm font-bold">{user.name}</span>
-            <span className="block truncate text-xs text-grey-300">{user.email}</span>
-          </span>
-        )}
+        <span className="min-w-0 rail:hidden">
+          <span className="block truncate text-sm font-bold">{user.name}</span>
+          <span className="block truncate text-xs text-grey-300">{user.email}</span>
+        </span>
       </MenuTrigger>
       <AccountMenuContent user={user} onSignOut={run} pending={pending} side="top" />
     </Menu>

@@ -594,6 +594,26 @@ things below the fold are tucked away (out of sight) once the page has loaded. I
 page's sections, the pricing questions, the gallery's drawing cards, the study card list and the
 settings sections.
 
+## Phones, tablets and loading
+
+- **The menu** (`src/components/app-sidebar.tsx`) is a bar along the bottom on phones, a rail of
+  icons on tablets (48–64rem), and the full menu on bigger screens, where **Minimize menu** turns it
+  into the rail. The rail is a CSS variant (`rail:` in `globals.css`); the minimized choice is put on
+  `<html>` (`data-sidebar="collapsed"`) by a small script in `src/app/layout.tsx` before the page
+  draws, so pages never open with the full menu and then slide. The staff-only **Admin** link isn't in
+  the phones' bar (it would arrive late and push the other tabs aside); staff open it from the account
+  menu there.
+- **The editor's header** keeps room for the title: on phones, Share, Export and Chemistry are in a
+  **⋯** menu. **New Drawing** reads **New** on the narrowest phones (still "New Drawing" to screen
+  readers).
+- **Layouts follow the space they get**, not the screen: the Settings cards use container queries
+  (`@container`), since next to the menu a tablet's column is narrower than a phone held sideways.
+  Grids holding long unbreakable text (an email address) cap their column at `minmax(0, 1fr)`, and
+  scrolling tables are `relative`, so visually hidden labels inside them can't widen the page.
+- **Loading placeholders** have the real content's sizes (the page header's avatar, the gallery's
+  tiles, the Settings cards at each width, the membership card, the whole admin frame), so nothing
+  jumps when the page fills in.
+
 ## Keyboard
 
 | Key | Action | Key | Action |
@@ -646,7 +666,7 @@ src/
     api/check-math               POST a selection image -> verdict JSON
     api/avatars/[userId]         GET a profile picture (signed in; cached privately per version)
   components/
-    app-sidebar.tsx              dark sidebar (tools in the editor), collapsible, bottom bar on phones
+    app-sidebar.tsx              dark sidebar (tools in the editor): bottom bar on phones, icon rail on tablets
     user-menu.tsx                avatar + account menu (Settings, Membership, Sign out)
     motion/                      Reveal (slide in and out on scroll) and MotionProvider (reduced motion)
     settings/                    profile (picture and name) and effects, with their live examples

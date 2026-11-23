@@ -27,7 +27,7 @@ export const metadata: Metadata = { title: "Membership" };
 export default function MembershipPage({ searchParams }: PageProps<"/membership">) {
   return (
     <SplitLayout>
-      <section className="w-full max-w-[560px] rounded-xl bg-card px-5 py-6 sm:p-8">
+      <section className="@container w-full max-w-[560px] rounded-xl bg-card px-5 py-6 sm:p-8">
         <Suspense fallback={<CardSkeleton />}>
           <MembershipCard searchParams={searchParams} />
         </Suspense>
@@ -36,13 +36,15 @@ export default function MembershipPage({ searchParams }: PageProps<"/membership"
   );
 }
 
+/** About as tall as the card it stands in for (narrow cards wrap more), so the centred card doesn't jump. */
 function CardSkeleton() {
   return (
-    <div className="space-y-5" aria-label="Loading">
+    <div className="flex h-[288px] flex-col gap-4 @[480px]:h-[236px]" aria-label="Loading">
       <Skeleton className="h-9 w-2/3" />
+      <Skeleton className="h-5 w-28" />
       <Skeleton className="h-5 w-full" />
-      <Skeleton className="h-14 w-1/3" />
-      <Skeleton className="h-[53px] w-full" />
+      <Skeleton className="mt-auto h-[53px] w-full" />
+      <Skeleton className="mx-auto h-4 w-3/4" />
     </div>
   );
 }

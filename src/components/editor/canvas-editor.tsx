@@ -3,6 +3,7 @@
 import {
   ArrowLeft,
   ChevronDown,
+  Ellipsis,
   Eye,
   FileDown,
   FileImage,
@@ -630,14 +631,19 @@ export function CanvasEditor({
               role === "owner" ? "Invite people to draw with you, live" : `Shared by ${ownerName ?? "the owner"}`
             }
           >
-            <Button variant="light" className={BAR_BUTTON} onClick={() => setShareOpen(true)} aria-label="Share">
+            <Button
+              variant="light"
+              className={cn(BAR_BUTTON, "max-sm:hidden")}
+              onClick={() => setShareOpen(true)}
+              aria-label="Share"
+            >
               <Share2 /> <span className="max-lg:hidden">Share</span>
             </Button>
           </Tip>
 
           <Menu>
             <MenuTrigger asChild>
-              <Button variant="light" className={BAR_BUTTON} aria-label="Export">
+              <Button variant="light" className={cn(BAR_BUTTON, "max-sm:hidden")} aria-label="Export">
                 <FileDown className="sm:hidden" />
                 <span className="max-sm:hidden">Export</span>
                 <ChevronDown className="max-sm:hidden" />
@@ -664,7 +670,7 @@ export function CanvasEditor({
           <Tip content="Molar mass, balancing equations and the periodic table">
             <Button
               variant="light"
-              className={BAR_BUTTON}
+              className={cn(BAR_BUTTON, "max-sm:hidden")}
               onClick={() => setChemOpen((o) => !o)}
               aria-label="Chemistry"
               aria-pressed={chemOpen}
@@ -672,6 +678,35 @@ export function CanvasEditor({
               <FlaskConical /> <span className="max-xl:hidden">Chemistry</span>
             </Button>
           </Tip>
+
+          {/* Phones: Share, Export and Chemistry share one menu, so the title has room. */}
+          <Menu>
+            <MenuTrigger asChild>
+              <Button variant="light" className={cn(BAR_BUTTON, "sm:hidden")} aria-label="More">
+                <Ellipsis />
+              </Button>
+            </MenuTrigger>
+            <MenuContent align="end" className="w-56">
+              <MenuItem onSelect={() => setShareOpen(true)}>
+                <Share2 /> Share
+              </MenuItem>
+              <MenuItem onSelect={() => setChemOpen((o) => !o)}>
+                <FlaskConical /> {chemOpen ? "Close chemistry" : "Chemistry"}
+              </MenuItem>
+              <MenuSeparator />
+              <MenuItem onSelect={exportPng}>
+                <FileImage /> Export PNG
+              </MenuItem>
+              <MenuItem onSelect={() => void downloadBackup()}>
+                <FileDown /> Download backup (.json)
+              </MenuItem>
+              {readOnly ? null : (
+                <MenuItem onSelect={() => backupInputRef.current?.click()}>
+                  <FileUp /> Load backup…
+                </MenuItem>
+              )}
+            </MenuContent>
+          </Menu>
 
           <Tip content="Draw a loop around an equation and the AI checks each step">
             <Button

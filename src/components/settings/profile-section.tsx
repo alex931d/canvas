@@ -91,12 +91,12 @@ export function ProfileSection({
     });
 
   return (
-    <div className="grid gap-8 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] md:gap-10">
-      <div className="flex items-center gap-5 md:flex-col md:items-start">
+    <div className="grid gap-8 @2xl:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] @2xl:gap-10">
+      <div className="flex flex-wrap items-center gap-5 @2xl:flex-col @2xl:flex-nowrap @2xl:items-start">
         <Avatar
           name={nameState.ok && nameState.value ? nameState.value : user.name}
           src={preview ?? avatar}
-          className="size-24 text-3xl ring-4 ring-white md:size-32 md:text-4xl"
+          className="size-24 text-3xl ring-4 ring-white @2xl:size-32 @2xl:text-4xl"
         />
         <div className="grid gap-2">
           <input
@@ -127,7 +127,7 @@ export function ProfileSection({
       <div className="grid content-start gap-6">
         <form action={submitName} className="grid gap-2">
           <Label htmlFor="settings-name">Name</Label>
-          <div className="flex gap-2 max-sm:flex-col">
+          <div className="flex flex-col gap-2 @md:flex-row">
             <Input
               id="settings-name"
               name="name"
