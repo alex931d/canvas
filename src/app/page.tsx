@@ -4,6 +4,7 @@ import { StaffSidebarLink } from "@/components/admin/staff-sidebar-link";
 import { AppSidebar, SidebarLink } from "@/components/app-sidebar";
 import { NewDrawingButton } from "@/components/gallery/new-drawing-button";
 import { Overview, OverviewSkeleton } from "@/components/gallery/overview";
+import { HeaderUserSlot } from "@/components/header-user-slot";
 import { HeaderUserMenu, SidebarUserMenu } from "@/components/user-menu";
 import { StudyBuddies } from "@/components/buddy/study-buddies";
 import { requireUser } from "@/lib/auth/session";
@@ -51,7 +52,7 @@ export default function Home() {
             <h1 className="text-[32px] leading-tight font-bold">Drawings</h1>
             <div className="flex items-center gap-3">
               <NewDrawingButton />
-              <Suspense fallback={null}>
+              <Suspense fallback={<HeaderUserSlot />}>
                 <HeaderUser />
               </Suspense>
             </div>

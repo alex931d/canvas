@@ -74,7 +74,7 @@ export function BuddiesSection({ initial, wildOn }: { initial: BuddySettings; wi
           {status === "saving" ? "Saving…" : status === "saved" ? "Saved" : ""}
         </span>
       </div>
-      <div className="grid gap-5 md:max-w-xl">
+      <div className="grid max-w-xl gap-5">
         {rows.map((r) => (
           <label
             key={r.key}

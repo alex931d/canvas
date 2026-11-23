@@ -25,7 +25,11 @@ export function LoginForm({ next, captcha }: { next: string; captcha: CaptchaSit
         id="password"
         label="Password"
         aside={
-          <Link href="/forgot-password" className="text-xs font-bold text-grey-900 underline underline-offset-4 hover:text-green">
+          <Link
+            href="/forgot-password"
+            // A taller tap area than the text, without moving anything.
+            className="-my-1.5 inline-block py-1.5 text-xs font-bold text-grey-900 underline underline-offset-4 hover:text-green"
+          >
             Forgot password?
           </Link>
         }

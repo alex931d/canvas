@@ -9,6 +9,7 @@ import { Reveal } from "@/components/motion/reveal";
 import { BuddiesSection } from "@/components/settings/buddies-section";
 import { EffectsSection } from "@/components/settings/effects-section";
 import { ProfileSection } from "@/components/settings/profile-section";
+import { HeaderUserSlot } from "@/components/header-user-slot";
 import { HeaderUserMenu, SidebarUserMenu } from "@/components/user-menu";
 import { requireUser } from "@/lib/auth/session";
 import { getMembership } from "@/lib/billing/membership";
@@ -51,7 +52,7 @@ export default function SettingsPage() {
         <div className="mx-auto w-full max-w-[1080px]">
           <header className="mb-8 flex items-center justify-between gap-4">
             <h1 className="text-[32px] leading-tight font-bold">Settings</h1>
-            <Suspense fallback={null}>
+            <Suspense fallback={<HeaderUserSlot />}>
               <HeaderUser />
             </Suspense>
           </header>
@@ -70,19 +71,19 @@ async function SettingsContent() {
   const [buddies, rules] = isMember ? await Promise.all([getSettings(user.id), getWildRules()]) : [null, null];
   return (
     <div className="grid gap-6">
-      <Reveal as="section" aria-labelledby="profile-title" className="rounded-xl bg-card p-5 md:p-8">
+      <Reveal as="section" aria-labelledby="profile-title" className="@container rounded-xl bg-card p-5 md:p-8">
         <h2 id="profile-title" className="mb-6 text-xl font-bold">
           Profile
         </h2>
         <ProfileSection user={{ id: user.id, name: user.name, email: user.email, avatarUrl: user.avatarUrl }} />
       </Reveal>
-      <Reveal as="section" aria-labelledby="effects-title" className="rounded-xl bg-card p-5 md:p-8">
+      <Reveal as="section" aria-labelledby="effects-title" className="@container rounded-xl bg-card p-5 md:p-8">
         <h2 id="effects-title" className="mb-6 text-xl font-bold">
           Effects
         </h2>
         <EffectsSection initial={preferences} />
       </Reveal>
-      <Reveal as="section" aria-labelledby="buddies-title" className="rounded-xl bg-card p-5 md:p-8">
+      <Reveal as="section" aria-labelledby="buddies-title" className="@container rounded-xl bg-card p-5 md:p-8">
         <h2 id="buddies-title" className="mb-6 text-xl font-bold">
           Study buddies
         </h2>
@@ -103,9 +104,10 @@ async function SettingsContent() {
 
 function SettingsSkeleton() {
   return (
-    <div className="grid gap-6" aria-label="Loading">
-      <Skeleton className="h-72 w-full rounded-xl bg-card" />
-      <Skeleton className="h-[30rem] w-full rounded-xl bg-card" />
+    // Sized like the Profile and Effects cards at each width (they follow the column's width too).
+    <div className="@container grid gap-6" aria-label="Loading">
+      <Skeleton className="h-[544px] w-full rounded-xl bg-card @[500px]:h-[474px] @[736px]:h-[346px]" />
+      <Skeleton className="h-[1165px] w-full rounded-xl bg-card @[500px]:h-[1190px] @[832px]:h-[731px]" />
     </div>
   );
 }

@@ -82,7 +82,7 @@ export function EffectsSection({ initial }: { initial: Preferences }) {
           This plays when a drawing opens, when someone else draws, and when you paste, undo or add an equation, graph
           or picture. What you draw yourself is on screen as you draw it, so it never replays.
         </p>
-        <div role="radiogroup" aria-labelledby="draw-effect-title" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div role="radiogroup" aria-labelledby="draw-effect-title" className="grid grid-cols-2 gap-3 @3xl:grid-cols-4">
           {DRAW_EFFECTS.map((effect) => {
             const checked = prefs.drawEffect === effect;
             const info = DRAW_EFFECT_INFO[effect];
@@ -123,7 +123,7 @@ export function EffectsSection({ initial }: { initial: Preferences }) {
         </div>
       </motion.div>
 
-      <div className="grid gap-6 border-t border-grey-100 pt-8 md:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] md:items-center md:gap-10">
+      <div className="grid gap-6 border-t border-grey-100 pt-8 @2xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] @2xl:items-center @2xl:gap-10">
         <div className="grid gap-3">
           <div className="flex items-start justify-between gap-6">
             <label htmlFor="board-effects" className="grid gap-1">

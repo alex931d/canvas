@@ -5,6 +5,7 @@ import { StaffSidebarLink } from "@/components/admin/staff-sidebar-link";
 import { AppSidebar, SidebarLink } from "@/components/app-sidebar";
 import { BuddyCollection } from "@/components/buddy/collection";
 import { Skeleton } from "@/components/kit";
+import { HeaderUserSlot } from "@/components/header-user-slot";
 import { HeaderUserMenu, SidebarUserMenu } from "@/components/user-menu";
 import { requireMember } from "@/lib/billing/membership";
 import { bambooFor } from "@/lib/buddy/kinds";
@@ -48,7 +49,7 @@ export default function BuddiesPage() {
         <div className="mx-auto w-full max-w-[1080px]">
           <header className="mb-8 flex items-center justify-between gap-4">
             <h1 className="text-[32px] leading-tight font-bold">Buddies</h1>
-            <Suspense fallback={null}>
+            <Suspense fallback={<HeaderUserSlot />}>
               <HeaderUser />
             </Suspense>
           </header>

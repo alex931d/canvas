@@ -43,14 +43,27 @@ export default function AdminPage({ searchParams }: PageProps<"/admin">) {
   );
 }
 
+/** The dashboard's frame (menu, header, totals, the accounts card) at its real sizes, so nothing jumps when it arrives. */
 function DashboardSkeleton() {
   return (
-    <div className="flex min-h-dvh" aria-label="Loading">
-      <div className="hidden w-[260px] bg-grey-900 md:block md:rounded-r-2xl" />
-      <div className="flex-1 space-y-6 px-4 py-8 md:px-10">
-        <Skeleton className="h-10 w-48" />
-        <Skeleton className="h-24 w-full" />
-        <Skeleton className="h-96 w-full" />
+    <div className="flex min-h-dvh flex-col md:flex-row" aria-label="Loading">
+      <div className="fixed inset-x-0 bottom-0 z-40 h-16 rounded-t-lg bg-grey-900 md:sticky md:top-0 md:h-dvh md:w-[260px] md:shrink-0 md:rounded-t-none md:rounded-r-2xl rail:w-[88px]" />
+      <div className="min-w-0 flex-1 px-4 pt-6 pb-28 md:px-10 md:py-8">
+        <div className="mx-auto w-full max-w-[1140px]">
+          <div className="mb-8 flex h-[84px] items-start justify-between gap-4 md:h-16">
+            <div className="grid w-full max-w-md gap-2">
+              <Skeleton className="h-10 w-32" />
+              <Skeleton className="h-4 w-full" />
+            </div>
+            <Skeleton className="size-10 shrink-0 rounded-full md:hidden" />
+          </div>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {[0, 1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-[100px] rounded-xl bg-white" />
+            ))}
+          </div>
+          <Skeleton className="mt-8 h-[982px] rounded-xl bg-white md:h-[906px]" />
+        </div>
       </div>
     </div>
   );
@@ -418,7 +431,7 @@ function UserPanel({ actor, user }: { actor: SessionUser; user: UserDetail }) {
   const sectionTitle = "mb-4 text-base font-bold";
 
   return (
-    <div className="grid gap-4 p-4 pt-14 sm:p-6 sm:pt-14">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4 p-4 pt-14 sm:p-6 sm:pt-14">
       <div className="flex items-center gap-4 px-1">
         <Avatar name={user.name} src={user.avatarUrl} className="size-12 text-base" />
         <div className="min-w-0">
