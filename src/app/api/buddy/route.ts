@@ -45,7 +45,7 @@ export async function GET(request: Request) {
 export async function PUT(request: Request) {
   const auth = await member();
   if ("error" in auth) return auth.error;
-  if (!limiters.buddyByUser.consume(auth.user.id)) {
+  if (!(await limiters.buddyByUser.consume(auth.user.id)).ok) {
     return Response.json({ error: "Too many changes at once." }, { status: 429 });
   }
   const parsed = settingsSchema.safeParse(await request.json().catch(() => null));

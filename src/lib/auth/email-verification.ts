@@ -62,9 +62,8 @@ export async function secondsUntilResend(userId: string): Promise<number> {
 export async function sendVerificationCode(account: Account, deliver: "now" | "after-response"): Promise<SendCodeResult> {
   const wait = await secondsUntilResend(account.id);
   if (wait > 0) return { ok: false, reason: "wait", seconds: wait };
-  if (!limiters.codeEmailsByUser.consume(account.id)) {
-    return { ok: false, reason: "wait", seconds: limiters.codeEmailsByUser.retryAfter(account.id) };
-  }
+  const limit = await limiters.codeEmailsByUser.consume(account.id);
+  if (!limit.ok) return { ok: false, reason: "wait", seconds: limit.retryAfter };
 
   const code = randomInt(0, 100_000_000).toString().padStart(8, "0");
   const row = {

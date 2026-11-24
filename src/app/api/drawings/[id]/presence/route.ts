@@ -42,7 +42,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/drawings/[i
   if (!user) return new Response(null, { status: 401 });
   const { id } = await ctx.params;
   if (!(await mayView(id, user.id))) return new Response(null, { status: 404 });
-  if (!limiters.presenceByUser.consume(user.id)) return new Response(null, { status: 429 });
+  if (!(await limiters.presenceByUser.consume(user.id)).ok) return new Response(null, { status: 429 });
 
   let body: z.infer<typeof bodySchema>;
   try {

@@ -15,7 +15,7 @@ export async function POST() {
   if (!user) return Response.json({ error: "Sign in to meet wild pandas" }, { status: 401 });
   const notMember = await membershipRequiredResponse(user.id, "Study buddies");
   if (notMember) return notMember;
-  if (!limiters.wildByUser.consume(user.id)) {
+  if (!(await limiters.wildByUser.consume(user.id)).ok) {
     return Response.json({ error: "Looking too often. Try again in a moment." }, { status: 429 });
   }
   const wild = await lookForWild(user.id);

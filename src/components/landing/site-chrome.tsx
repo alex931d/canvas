@@ -3,7 +3,7 @@ import { SeasonalHeaderDecor } from "@/components/seasonal/site-decor";
 import { Button } from "@/components/kit";
 import { cn } from "@/lib/utils";
 
-/** The public pages' frame (landing page and pricing): header, footer and shared spacing. */
+/** The public pages' frame (landing, pricing and terms): header, footer and shared spacing. */
 
 /** The dotted paper of the canvas, for "board" panels. */
 export const DOT_GRID = {
@@ -78,9 +78,19 @@ export function SiteFooter() {
   return (
     <footer className={OUTER}>
       {/* Extra room underneath for the seasonal "Hide decorations" button, which sits in the corner. */}
-      <div className={cn(INNER, "flex flex-wrap items-center justify-between gap-4 pt-10 pb-20 text-sm text-grey-500")}>
-        <Wordmark className="text-xl text-grey-900" />
-        <p>An infinite canvas for notes and math.</p>
+      <div className={cn(INNER, "flex flex-wrap items-center justify-between gap-x-8 gap-y-4 pt-10 pb-20 text-sm text-grey-500")}>
+        <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <Wordmark className="text-xl text-grey-900" />
+          <span>An infinite canvas for notes and math.</span>
+        </span>
+        <nav aria-label="About canvas" className="-mx-2 flex gap-1 sm:-mx-3">
+          <Link href="/pricing" className={cn(navLink, "font-normal text-grey-500 hover:text-grey-900")}>
+            Pricing
+          </Link>
+          <Link href="/terms" className={cn(navLink, "font-normal text-grey-500 hover:text-grey-900")}>
+            Terms of service
+          </Link>
+        </nav>
       </div>
     </footer>
   );

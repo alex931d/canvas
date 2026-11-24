@@ -43,10 +43,11 @@ export async function POST(request: Request, ctx: RouteContext<"/api/drawings/[i
     return Response.json({ error: "Invalid drawing id" }, { status: 400 });
   }
 
-  if (!limiters.uploadsByUser.consume(user.id)) {
+  const rate = await limiters.uploadsByUser.consume(user.id);
+  if (!rate.ok) {
     return Response.json(
       { error: "Too many uploads at once. Retrying shortly." },
-      { status: 429, headers: { "Retry-After": String(limiters.uploadsByUser.retryAfter(user.id)) } },
+      { status: 429, headers: { "Retry-After": String(rate.retryAfter) } },
     );
   }
 

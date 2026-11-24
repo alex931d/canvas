@@ -54,9 +54,9 @@ const outline = await page.evaluate(() => ({
 check("one h1, then a heading per section", outline.h1.length === 1 && outline.h2.length === 5, outline.h2.join(" | "));
 check("header, main and footer landmarks", outline.landmarks);
 check(
-  "the $1 membership is on the page, self-hosting isn't",
-  /\$1 a month\. Cancel any time\./.test(outline.text) &&
-    /One membership, \$1 a month/.test(outline.text) &&
+  "the $5 membership is on the page, self-hosting isn't",
+  /\$5 a month\. Cancel any time\./.test(outline.text) &&
+    /One membership, \$5 a month/.test(outline.text) &&
     !/Run your own copy|docker compose/.test(outline.text),
 );
 check("every image has alt text", outline.imgsWithoutAlt === 0);
@@ -149,6 +149,52 @@ check("no sideways scrolling, and the hero fits its board, at 360–1920 px", wi
 
 // ------------------------------------------------------------ who sees it
 const ctxB = await browser.createBrowserContext();
+// ------------------------------------------------------------ the terms of service
+{
+  const tctx = await browser.createBrowserContext();
+  const tp = await newPage(tctx, { width: 1280, height: 900 });
+  const termsRes = await tp.goto(`${BASE}/terms`, { waitUntil: "networkidle0" });
+  check("/terms is public", termsRes.status() === 200 && new URL(tp.url()).pathname === "/terms");
+  const terms = await tp.evaluate(() => ({
+    h1: document.querySelector("h1")?.textContent,
+    sections: [...document.querySelectorAll("article section[id] h2")].map((h) => h.textContent.trim()),
+    contents: [...document.querySelectorAll("nav[aria-labelledby=contents-title] a")].map((a) => a.getAttribute("href")),
+    ids: [...document.querySelectorAll("article section[id]")].map((s) => `#${s.id}`),
+    text: document.querySelector("article")?.innerText ?? "",
+    updated: document.querySelector("time")?.getAttribute("datetime"),
+  }));
+  check(
+    "it has its title, a date and twelve numbered sections",
+    terms.h1 === "Terms of service" && /^\d{4}-\d{2}-\d{2}$/.test(terms.updated ?? "") && terms.sections.length === 12 && /^1\./.test(terms.sections[0]),
+    `${terms.h1} ${terms.updated} ${terms.sections.length}`,
+  );
+  check("the contents link to every section", terms.contents.join() === terms.ids.join(), terms.contents.join());
+  check(
+    "the membership terms quote the plan's price and how to cancel",
+    /It costs \$5 a month in US dollars/.test(terms.text) && /cancel any time from the Membership page/.test(terms.text),
+  );
+  await tp.click("nav[aria-labelledby=contents-title] a[href='#ai']");
+  await sleep(300);
+  check("a contents link jumps to its section", await tp.$eval("#ai", (el) => Math.abs(el.getBoundingClientRect().top) < 80));
+  for (const [path, where] of [["/welcome", "landing page"], ["/pricing", "pricing page"]]) {
+    await tp.goto(`${BASE}${path}`, { waitUntil: "networkidle0" });
+    check(`the ${where}'s footer links to the terms`, !!(await tp.$("footer a[href='/terms']")));
+  }
+  await tp.goto(`${BASE}/signup`, { waitUntil: "networkidle0" });
+  check(
+    "signing up says you agree to the terms, with a link",
+    /By creating an account you agree to the terms of service/.test(await tp.$eval("form", (f) => f.innerText)) &&
+      !!(await tp.$("form a[href='/terms']")),
+  );
+  const phone = await newPage(tctx, { width: 360, height: 740, isMobile: true, hasTouch: true });
+  await phone.goto(`${BASE}/terms`, { waitUntil: "networkidle0" });
+  check(
+    "it fits a 360px phone",
+    await phone.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
+  );
+  await tctx.close();
+}
+
 const pb = await newPage(ctxB, { width: 1280, height: 800 });
 const user = await signUp(pb, { name: "Landing Test" });
 await pb.goto(BASE, { waitUntil: "networkidle0" });

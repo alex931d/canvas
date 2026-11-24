@@ -30,7 +30,7 @@ export async function POST(request: Request) {
   if (!user) return Response.json({ error: "Sign in to battle" }, { status: 401 });
   const notMember = await membershipRequiredResponse(user.id, "Study buddies");
   if (notMember) return notMember;
-  if (!limiters.battleByUser.consume(user.id)) {
+  if (!(await limiters.battleByUser.consume(user.id)).ok) {
     return Response.json({ error: "That's a lot of turns at once. Take a breath." }, { status: 429 });
   }
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));

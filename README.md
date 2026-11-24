@@ -45,7 +45,7 @@ animation, and its own component kit (with Radix underneath for menus and dialog
   ones shared with them.
 - **Landing page** at `/` for visitors who aren't logged in, opening with an animated math check
   (see below). Logged-in people get their drawings at `/` instead.
-- **Memberships**: using canvas takes a $1/month membership. The pricing page (`/pricing`, linked
+- **Memberships**: using canvas takes a $5/month membership. The pricing page (`/pricing`, linked
   from the landing page) is where people buy it, and where anyone signed in without one is sent to
   start or renew it; Stripe Checkout takes the payment and Stripe's billing portal manages it (see
   below).
@@ -142,12 +142,12 @@ Without a key, everything else works and **Check math** explains how to set it u
 | `npm run db:migrate` | Apply pending migrations in `drizzle/` (`scripts/migrate.mjs`; explains connection problems, unlike `drizzle-kit migrate`, which exits silently) |
 | `npm run db:push` | Push the schema straight to the database (prototyping) |
 | `npm run db:studio` | Browse the data in Drizzle Studio |
-| `npm run stripe:setup` | Create the membership's product and $1/month price in Stripe and print `STRIPE_PRICE_ID` |
+| `npm run stripe:setup` | Create the membership's product and $5/month price in Stripe and print `STRIPE_PRICE_ID` |
 | `npm run membership -- grant\|revoke\|show <email>` | Complimentary memberships (no Stripe involved) |
 | `npm run role -- set <email> <role>\|show <email>\|list` | Roles: make the first admin (see [Roles](#roles-and-the-admin-dashboard)) |
 | `npm run typecheck` | Generate route types and run `tsc` |
 | `npm run test:e2e` | Browser tests (see below) |
-| `npm run test:unit` | Quick checks of the chemistry, graph, collaboration and calendar logic, no browser needed |
+| `npm run test:unit` | Quick checks of the chemistry, graph, collaboration and calendar logic, no browser needed, then the rate limits against a throwaway `redis-server` |
 
 ## Accounts and sessions
 
@@ -246,6 +246,16 @@ and confirmation emails leave the link out (the code still works).
   wrong passwords; 10 code entries per account with one more every 6 s; 10 "forgot password"
   requests per IP with one more every 30 s; 10 new passwords from reset links per IP with one more
   every 10 s; 10 math checks per person with one more every 30 s.
+- **Where the limits are kept:** in Redis when `REDIS_URL` is set (`src/lib/redis.ts`), so they're
+  shared by every server instance and survive restarts and deploys; without it, in the server's
+  memory (fine on your own machine). Each check is one Lua script in Redis, so it's atomic (requests
+  arriving together can't both take the last token) and runs on Redis's clock. Keys are
+  `canvas:rl:<limit>:<hash>`: SHA-256 of the IP, email or user id, so Redis holds no email addresses
+  or IPs, and each key expires once there's nothing left to remember (a full bucket, or a day after the
+  last login attempt). If Redis can't be reached, requests go through and the error is logged once a
+  minute: an outage slows nothing down by more than a second and locks nobody out
+  (`src/lib/rate-limit/buckets.ts`). Locally, `docker compose up -d` starts Redis next to Postgres;
+  in production any Redis works (Upstash's free tier: use its `rediss://` URL).
 - Cross-site requests: `src/proxy.ts` rejects any non-GET request that the browser marks as not
   same-origin (`Sec-Fetch-Site`) or whose `Origin` isn't this site (Server Actions also check this
   themselves).
@@ -333,7 +343,7 @@ menu; anyone without a membership who opens it goes to `/pricing`.
 
 1. Create a Stripe account and copy the test-mode secret key (`sk_test_...`) into `.env.local` as
    `STRIPE_SECRET_KEY`.
-2. `npm run stripe:setup` creates the product and the $1/month price and prints `STRIPE_PRICE_ID`.
+2. `npm run stripe:setup` creates the product and the $5/month price and prints `STRIPE_PRICE_ID`.
    Running it again finds the same price.
 3. In the Stripe Dashboard, open **Settings → Billing → Customer portal** and save it once, so the
    billing portal works. Choose what members can do there (cancel, update card, see invoices).
@@ -347,9 +357,35 @@ webhook endpoint in the Dashboard for `https://your-site/api/stripe/webhook` tha
 `.resumed`, `invoice.paid` and `invoice.payment_failed`. Its signing secret is the live
 `STRIPE_WEBHOOK_SECRET`.
 
-**Costs:** Stripe's standard US card fee is 2.9% + 30¢ per successful charge, so about 33¢ of each $1
+**Changing the price:** set `unitAmount` and `price` in `src/lib/billing/plan.ts`, run
+`npm run stripe:setup` again (it makes a new price and moves the lookup key to it), and put the new
+`STRIPE_PRICE_ID` in your environment. New memberships get the new price; members who already pay
+stay on their old price until you move their subscriptions over in the Stripe Dashboard (tell them
+first: the [terms](#terms-of-service) promise notice before a new price applies).
+
+**Costs:** Stripe's standard US card fee is 2.9% + 30¢ per successful charge, so about 45¢ of each $5
 renewal goes to fees (more for cards from other countries). Sales tax and VAT aren't calculated; look
 at Stripe Tax if you need them.
+
+## Terms of service
+
+`/terms` (`src/app/terms/page.tsx`) is public, linked from the footer of the landing, pricing and
+terms pages, from the sign-up form ("By creating an account you agree to the terms of service") and
+from the pricing card before checkout. It's written in plain language and covers who can use canvas
+(13 and up; a parent or guardian agrees for anyone under 18), accounts, the membership (the price comes
+from `src/lib/billing/plan.ts`, so it always matches; monthly renewal, cancelling from `/membership`,
+no refunds for partial months except where the law requires, 30 days' notice of a new price), your
+content (it stays yours; what canvas does with it), fair use, AI math checks being a second opinion,
+availability, closing an account (by email, as there's no delete button yet), disclaimers, limits on
+liability, and changes to the terms (30 days' notice by email for important ones).
+
+- **Contact:** set `CONTACT_EMAIL`. Without it the page uses the address in `EMAIL_FROM`, unless that's
+  a no-reply address, and otherwise just says "by email".
+- **Before relying on it,** have a lawyer look it over for where you operate: it names no company,
+  governing law or venue, and consumer, tax and refund rules differ by country and state. A privacy
+  policy is the natural companion (what's stored, the AI provider and Stripe as processors).
+- **Changing it:** edit the page and its `UPDATED` date, and email members about important changes 30
+  days ahead, as section 11 promises.
 
 ## Roles and the admin dashboard
 
@@ -829,6 +865,7 @@ src/
     (account)/actions.ts         confirm the code, send a new one, request a reset, save the new password
     welcome/page.tsx             landing page (served at / to visitors without a session)
     pricing/page.tsx             the plan, and the next step for whoever's looking (join, renew, confirm email)
+    terms/page.tsx               the terms of service (public)
     membership/                  members' page (billing portal, confirmation after paying); actions start Checkout
     admin/page.tsx               admin dashboard: totals, search, role filter, ← 1 2 3 4 5 → pager, edit panel
     admin/actions.ts             staff actions: save details and role, complimentary memberships, sign out, reset link,
@@ -904,7 +941,9 @@ src/
     auth/email-verification.ts   8-digit codes: send, re-send, check
     auth/password-reset.ts       reset links: send, look up, use
     auth/captcha.ts              Turnstile siteverify (server); captcha-shared.ts for the forms
-    auth/rate-limit.ts           token buckets and the per-account login throttle
+    auth/rate-limit.ts           the rate limits: token buckets and the per-account login throttle
+    rate-limit/buckets.ts        how they work, in Redis (Lua) or in memory
+    redis.ts                     the Redis connection (REDIS_URL)
     auth/roles.ts                roles, what each may do (can, canManage), shared by pages and server
     seasons.ts                   seasonal themes: dates (Easter computed per year) and what each one shows
     site/settings.ts             site-wide settings (the seasonal theme, the wild pandas' rules)
@@ -913,7 +952,7 @@ src/
     email/send.ts                SMTP via nodemailer, or the console when SMTP_URL isn't set
     email/templates.ts           the code, reset and "password changed" emails (text and HTML)
     site-url.ts                  this site's address, and the one links in emails use
-    billing/plan.ts              the plan: $1 a month, and what it includes
+    billing/plan.ts              the plan: $5 a month, and what it includes
     billing/stripe.ts            the Stripe client and its settings
     billing/membership.ts        who's a member: getMembership, requireMember
     billing/sync.ts              Stripe customers, and copying subscriptions from Stripe
@@ -1088,6 +1127,10 @@ TURNSTILE_VERIFY_URL=http://localhost:4030/turnstile/v0/siteverify npm start
 AI_MODEL=mock-vision npm run test:e2e                    # in another terminal
 ```
 
+They pass with or without `REDIS_URL`; with it (e.g. `docker compose up -d` and
+`REDIS_URL=redis://localhost:6379` in `.env.local`), the app keeps its rate limits in Redis and
+`test-auth` checks they're there.
+
 `e2e/mock-stripe.mjs` answers the Stripe API calls the app makes, serves stand-in checkout and billing
 portal pages, and sends webhooks signed the way Stripe signs them. `STRIPE_API_BASE` only exists for
 it. `e2e/mock-turnstile.mjs` serves a widget script and `siteverify`: only tokens it issued pass, once
@@ -1095,26 +1138,35 @@ each, and it reports which form a token came from (real Turnstile is built to st
 and its test keys accept any token). `TURNSTILE_SCRIPT_URL` and `TURNSTILE_VERIFY_URL` only exist for
 it. `e2e/mock-mail.mjs` keeps every email the app sends, for the tests to read codes and links from.
 
-- `e2e/test-landing.mjs` (21 checks): `/` is the prerendered landing page when signed out and the
-  drawings when signed in; the $1 membership on the page; headings, landmarks, alt text and keyboard
+- `e2e/test-landing.mjs` (30 checks): `/` is the prerendered landing page when signed out and the
+  drawings when signed in; the $5 membership on the page; headings, landmarks, alt text and keyboard
   focus; the sign-up, login and pricing links; the hero animation's start and end, and reduced motion; no
-  sideways scrolling from 360 to 1920 px wide; no console errors or failed requests.
-- `e2e/test-billing.mjs` (53 checks): the pricing page for a visitor, an unconfirmed account, a new
-  account, a lapsed member and a member, with the steps marked; the landing page's links to it;
+  sideways scrolling from 360 to 1920 px wide; the terms of service (public, twelve numbered sections
+  with working contents links, the plan's price, linked from the footers and the sign-up form, fitting a
+  360 px phone); no console errors or failed requests.
+- `e2e/test-billing.mjs` (54 checks): the pricing page for a visitor, an unconfirmed account, a new
+  account, a lapsed member and a member, with the steps marked (and agreeing to the terms before
+  checkout); the landing page's links to it;
   confirming the email leading there, and everything else (the drawings, `/membership`) sending
   non-members there; backing out of Checkout; paying, and the membership being there before the
   webhook arrives; the stored customer, price and renewal date; cancelling, renewing and ending it in
   the billing portal; an editor that's open when the membership ends keeps changes locally and syncs
   them after renewing; failed payments (`past_due` keeps access, `unpaid` doesn't); unsigned, wrongly
   signed and unrelated webhooks; complimentary memberships with `npm run membership`.
-- `e2e/test-auth.mjs` (36 checks): the landing page and login redirects when signed out; sign-up
+- `e2e/test-auth.mjs` (37 checks): the landing page and login redirects when signed out; sign-up
   asking for the emailed code, and the code leading on to the membership page; sign-up validation and
   unique emails;
   the Argon2id hash, the cookie's flags and token format, and SHA-256 secret hash in Postgres; first
   account adopting old drawings; sign-out (session row, cookie, local copies); login with `?next=`
   (and no redirects to other sites); throttled wrong passwords; a second person can't list, open,
   fetch or upload into the first person's drawing; hourly activity refresh, tampered tokens and the
-  30-day expiry; the math-check rate limit; cross-site POSTs refused.
+  30-day expiry; the math-check rate limit; cross-site POSTs refused; with `REDIS_URL` set, the rate
+  limits kept in Redis under hashed keys.
+- `e2e/test-rate-limit.mts` (19 checks, part of `npm run test:unit`; starts its own `redis-server`):
+  token buckets in Redis giving the same answers as in memory, refilling, costs, separate keys and
+  limits, waits for slow buckets, hashed keys that expire when full again, 50 requests at once against
+  10 tokens letting exactly 10 through, the login throttler's growing waits, reset and one-day
+  memory, and requests let through quickly (with one log line) when Redis is down.
 - `e2e/test-account.mjs` (42 checks): the CAPTCHA on sign-up, login and forgot password; made-up,
   missing, reused and other-form tokens refused; pressing the button before the check is done. Email
   codes: the email and its link, the SHA-256 in Postgres, nothing else opening (pages or API) until
@@ -1237,8 +1289,8 @@ membership is what's being tested). They need Chrome (`CHROME_PATH` if it isn't
   for both; a changed address would need confirming again, which `email_verified` and the codes table
   already support). There's no "delete my account" either; if you add one, cancel the person's Stripe
   subscription first, or Stripe keeps charging them.
-- **Rate limits live in memory**, so they reset on restart and aren't shared between server
-  processes. Move them to Redis or Postgres if you run more than one.
+- **Set `REDIS_URL` in production.** Without it the rate limits live in each server's memory, so they
+  reset on every deploy and each serverless instance keeps its own (the server warns at start).
 - **Client IP** for rate limits comes from `X-Forwarded-For`. Deploy behind a proxy that sets it
   (Vercel, Fly, nginx); otherwise people could set it themselves to dodge the per-IP limits.
 - **Next.js 16 Cache Components** is on. Database reads call `await io()` and render inside

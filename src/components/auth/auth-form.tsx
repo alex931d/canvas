@@ -81,6 +81,13 @@ export function SignupForm({ captcha }: { captcha: CaptchaSite | "loading" }) {
         <PasswordInput id="password" autoComplete="new-password" invalid={!!fe.password} describedBy="password-hint" />
       </Field>
       {human.field}
+      <p className="text-xs leading-relaxed text-grey-500">
+        By creating an account you agree to the{" "}
+        <Link href="/terms" className={linkClass}>
+          terms of service
+        </Link>
+        .
+      </p>
       <SubmitButton pending={pending || human.waiting}>{human.waiting ? CHECKING : "Create Account"}</SubmitButton>
       <p className="mt-2 text-center text-sm text-grey-500">
         Already have an account?{" "}
