@@ -41,10 +41,11 @@ export async function POST(request: Request, ctx: RouteContext<"/api/drawings/[i
   if (auth instanceof Response) return auth;
   const { user } = auth;
 
-  if (!limiters.changesByUser.consume(user.id)) {
+  const limit = await limiters.changesByUser.consume(user.id);
+  if (!limit.ok) {
     return Response.json(
       { error: "Too many changes at once. Retrying shortly." },
-      { status: 429, headers: { "Retry-After": String(limiters.changesByUser.retryAfter(user.id)) } },
+      { status: 429, headers: { "Retry-After": String(limit.retryAfter) } },
     );
   }
 

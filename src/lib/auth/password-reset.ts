@@ -46,7 +46,7 @@ export async function sendPasswordResetLink(email: string, origin: string | null
     );
     return "no-app-url";
   }
-  if (!limiters.resetEmailsByAddress.consume(user.email)) return "limited";
+  if (!(await limiters.resetEmailsByAddress.consume(user.email)).ok) return "limited";
 
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);

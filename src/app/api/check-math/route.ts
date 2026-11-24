@@ -24,8 +24,9 @@ export async function POST(request: Request) {
   if (!user) return Response.json({ error: "Sign in to check math." }, { status: 401 });
   const notMember = await membershipRequiredResponse(user.id, "Math checks");
   if (notMember) return notMember;
-  if (!limiters.mathByUser.consume(user.id)) {
-    const wait = limiters.mathByUser.retryAfter(user.id);
+  const limit = await limiters.mathByUser.consume(user.id);
+  if (!limit.ok) {
+    const wait = limit.retryAfter;
     return Response.json(
       { error: `You've checked a lot of math just now. Try again in ${wait} seconds.` },
       { status: 429, headers: { "Retry-After": String(wait) } },

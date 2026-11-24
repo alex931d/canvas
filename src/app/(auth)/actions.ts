@@ -37,7 +37,7 @@ export async function signUp(_prev: AuthFormState, formData: FormData): Promise<
   const values = { name, email };
 
   const ip = await clientIp();
-  if (!limiters.signupByIp.consume(ip)) {
+  if (!(await limiters.signupByIp.consume(ip)).ok) {
     return { error: "Too many sign-ups from this network. Wait a few seconds and try again.", values };
   }
   const human = await verifyCaptcha(formData, "signup");
@@ -73,7 +73,7 @@ export async function logIn(_prev: AuthFormState, formData: FormData): Promise<A
   const values = { email };
 
   const ip = await clientIp();
-  if (!limiters.loginByIp.consume(ip)) {
+  if (!(await limiters.loginByIp.consume(ip)).ok) {
     return { error: "Too many attempts from this network. Wait a moment and try again.", values };
   }
   const human = await verifyCaptcha(formData, "login");
@@ -82,7 +82,7 @@ export async function logIn(_prev: AuthFormState, formData: FormData): Promise<A
     return { error: "Enter your email and password.", values };
   }
   // Growing delay per account; keyed by email so unknown emails behave the same.
-  if (!limiters.loginByAccount.consume(email)) {
+  if (!(await limiters.loginByAccount.consume(email))) {
     return { error: "Too many attempts for this account. Wait a few seconds and try again.", values };
   }
 
@@ -94,7 +94,7 @@ export async function logIn(_prev: AuthFormState, formData: FormData): Promise<A
     return { error: "That email and password don't match an account.", values };
   }
 
-  limiters.loginByAccount.reset(email);
+  await limiters.loginByAccount.reset(email);
   await setSessionCookie(await createSession(user.id));
   const next = safeNext(formData.get("next"));
   if (!user.emailVerified) {

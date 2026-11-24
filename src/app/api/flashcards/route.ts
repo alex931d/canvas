@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   if (!user) return Response.json({ error: "Sign in to make flashcards." }, { status: 401 });
   const notMember = await membershipRequiredResponse(user.id, "Flashcards");
   if (notMember) return notMember;
-  if (!limiters.flashcardsByUser.consume(user.id)) {
+  if (!(await limiters.flashcardsByUser.consume(user.id)).ok) {
     return Response.json({ error: "That's a lot of cards at once. Try again in a moment." }, { status: 429 });
   }
 

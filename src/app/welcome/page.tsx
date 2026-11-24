@@ -29,7 +29,7 @@ import {
 export const metadata: Metadata = {
   title: "canvas: sketch it, paste it, check it",
   description:
-    "An infinite canvas for notes, math and chemistry. Write by hand or paste a screenshot, check each step with AI, work on it with classmates live and turn it into flashcards. Membership is $1 a month.",
+    `An infinite canvas for notes, math and chemistry. Write by hand or paste a screenshot, check each step with AI, work on it with classmates live and turn it into flashcards. Membership is ${MEMBERSHIP.price} ${MEMBERSHIP.per}.`,
 };
 
 const TOOLS = [

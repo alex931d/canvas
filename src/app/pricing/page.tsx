@@ -7,18 +7,17 @@ import {
   DOT_GRID,
   INNER,
   OUTER,
-  SignedInLinks,
-  SignedOutLinks,
   SiteFooter,
   SiteHeader,
   linkFocus,
 } from "@/components/landing/site-chrome";
+import { HeaderAccount } from "@/components/landing/header-account";
 import { LocalDate } from "@/components/local-time";
 import { SeasonalBoardDecor, SeasonalEffects } from "@/components/seasonal/site-decor";
 import { Button, Skeleton } from "@/components/kit";
 import { getCurrentSession, type SessionUser } from "@/lib/auth/session";
 import { getMembership, type Membership } from "@/lib/billing/membership";
-import { MEMBERSHIP, MEMBERSHIP_INCLUDES } from "@/lib/billing/plan";
+import { CENTS_A_DAY, MEMBERSHIP, MEMBERSHIP_INCLUDES } from "@/lib/billing/plan";
 import { Reveal } from "@/components/motion/reveal";
 import { cn } from "@/lib/utils";
 
@@ -120,8 +119,13 @@ async function PlanActions({ searchParams }: { searchParams: PageProps<"/pricing
             </Notice>
           ) : null}
           <StartMembershipButton label={ended ? "Renew membership" : "Start membership"} variant="light" />
-          <p className="text-center text-xs text-grey-300">
-            You&apos;ll pay on Stripe&apos;s secure checkout page. Billed monthly in US dollars.
+          <p className="text-center text-xs leading-relaxed text-grey-300">
+            You&apos;ll pay on Stripe&apos;s secure checkout page. Billed monthly in US dollars until you cancel. By
+            starting a membership you agree to the{" "}
+            <Link href="/terms#membership" className={quietLink}>
+              terms of service
+            </Link>
+            .
           </p>
           <SignedInAs user={viewer.user} />
         </div>
@@ -154,10 +158,6 @@ function ActionsSkeleton() {
   );
 }
 
-async function HeaderAccount() {
-  const { user } = await getCurrentSession();
-  return user ? <SignedInLinks /> : <SignedOutLinks />;
-}
 
 const STEPS = [
   { title: "Create an account", text: "Your name, email and a password." },
@@ -277,12 +277,12 @@ export default function PricingPage({ searchParams }: PageProps<"/pricing">) {
                     strokeLinecap="round"
                   />
                 </svg>
-                <p className="relative text-grey-900">$1 ÷ 30 days</p>
+                <p className="relative text-grey-900">{MEMBERSHIP.price} ÷ 30 days</p>
                 <p className="relative text-grey-900">
-                  ≈ 3¢ a day <span className="text-green">✓</span>
+                  ≈ {CENTS_A_DAY}¢ a day <span className="text-green">✓</span>
                 </p>
                 <figcaption className="sr-only">
-                  {MEMBERSHIP.price} {MEMBERSHIP.per} works out at about 3 cents a day.
+                  {MEMBERSHIP.price} {MEMBERSHIP.per} works out at about {CENTS_A_DAY} cents a day.
                 </figcaption>
               </figure>
             </div>

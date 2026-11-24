@@ -251,6 +251,20 @@ const csrf = {
 check("cross-site POSTs get 403, same-origin ones get through", csrf.otherOrigin === 403 && csrf.crossSiteFetch === 403 && csrf.sameOrigin !== 403 && csrf.sameOrigin < 500, JSON.stringify(csrf));
 await ctxB.close();
 
+// ------------------------------------------------------------ limits kept in Redis (when REDIS_URL is set)
+if (process.env.REDIS_URL) {
+  const { default: Redis } = await import("ioredis");
+  const r = new Redis(process.env.REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1 });
+  const keys = await r.keys("canvas:rl:*").catch(() => []);
+  await r.quit().catch(() => {});
+  check(
+    "with REDIS_URL, the rate limits are kept in Redis, under hashed keys",
+    ["signupByIp", "loginByIp"].every((n) => keys.some((k) => k.startsWith(`canvas:rl:${n}:`))) &&
+      !keys.some((k) => /@|\d+\.\d+\.\d+\.\d+/.test(k)),
+    `${keys.length} keys`,
+  );
+}
+
 console.log("\nerrors:", errors.length ? errors : "none");
 await browser.close();
 process.exit(failures ? 1 : 0);

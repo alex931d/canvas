@@ -33,7 +33,7 @@ export async function saveName(_prev: NameState, formData: FormData): Promise<Na
   const problem = nameProblem(name);
   if (problem) return { error: problem, value: name };
   if (name === user.name) return { ok: "That's already your name.", value: name };
-  if (!limiters.profileByUser.consume(user.id)) return { error: TOO_FAST, value: name };
+  if (!(await limiters.profileByUser.consume(user.id)).ok) return { error: TOO_FAST, value: name };
   await setName(user.id, name);
   refresh();
   return { ok: "Name saved.", value: name };
@@ -44,7 +44,7 @@ export async function uploadAvatar(formData: FormData): Promise<ProfileResult> {
   if (!user) return { ok: false, error: SIGNED_OUT };
   const file = formData.get("avatar");
   if (!(file instanceof Blob)) return { ok: false, error: "Choose a picture to upload." };
-  if (!limiters.profileByUser.consume(user.id)) return { ok: false, error: TOO_FAST };
+  if (!(await limiters.profileByUser.consume(user.id)).ok) return { ok: false, error: TOO_FAST };
   const result = await setAvatar(user.id, file);
   if (!result.ok) return result;
   refresh();
@@ -64,7 +64,7 @@ export async function updatePreferences(next: Preferences): Promise<SaveResult> 
   if (!user) return { ok: false, error: SIGNED_OUT };
   const parsed = preferencesSchema.safeParse(next);
   if (!parsed.success) return { ok: false, error: "That setting isn't one canvas knows." };
-  if (!limiters.preferencesByUser.consume(user.id)) return { ok: false, error: TOO_FAST };
+  if (!(await limiters.preferencesByUser.consume(user.id)).ok) return { ok: false, error: TOO_FAST };
   await savePreferences(user.id, parsed.data);
   return { ok: true };
 }

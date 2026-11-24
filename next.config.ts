@@ -3,6 +3,8 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
+  // The Redis client for rate limits (src/lib/redis.ts) runs as plain Node, unbundled.
+  serverExternalPackages: ["ioredis"],
   experimental: {
     serverActions: {
       bodySizeLimit: "8mb",

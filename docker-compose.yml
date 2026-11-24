@@ -16,5 +16,17 @@ services:
       timeout: 3s
       retries: 20
 
+  # Rate limits (REDIS_URL=redis://localhost:6379). Optional on your machine.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
 volumes:
   pgdata:

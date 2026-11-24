@@ -24,7 +24,7 @@ export function secureCookies() {
 }
 
 /** Pages anyone can open without a session cookie… */
-export const PUBLIC_PATHS = ["/login", "/signup", "/welcome", "/pricing", "/forgot-password"];
+export const PUBLIC_PATHS = ["/login", "/signup", "/welcome", "/pricing", "/terms", "/forgot-password"];
 /** …and everything under these (password reset links). */
 export const PUBLIC_PREFIXES = ["/reset-password/"];
 

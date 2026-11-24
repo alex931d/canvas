@@ -250,7 +250,7 @@ const server = http.createServer(async (req, res) => {
     return page(
       res,
       "Subscribe to canvas membership",
-      `<p>US$1.00 per month, for ${customer?.email ?? "you"}.</p>
+      `<p>US$5.00 per month, for ${customer?.email ?? "you"}.</p>
        ${button(`/c/pay/${session.id}/complete`, "pay", "Subscribe")}
        <p><a id="back" href="${session.cancel_url}">Back to canvas</a></p>`,
     );
@@ -277,7 +277,7 @@ const server = http.createServer(async (req, res) => {
     const state = sub
       ? sub.cancel_at_period_end
         ? "Your plan is set to cancel at the end of the period."
-        : "Your plan renews monthly at US$1.00."
+        : "Your plan renews monthly at US$5.00."
       : "You have no active plan.";
     return page(
       res,

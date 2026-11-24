@@ -16,7 +16,7 @@
     "membership": "node scripts/membership.mjs",
     "role": "node scripts/role.mjs",
     "test:e2e": "node e2e/test-landing.mjs && node e2e/test-auth.mjs && node e2e/test-account.mjs && node e2e/test-billing.mjs && node e2e/test.mjs && node e2e/test-quota.mjs && node e2e/test-input.mjs && node e2e/test-collab.mjs && node e2e/test-study.mjs && node e2e/test-boards.mjs && node e2e/test-admin.mjs && node e2e/test-seasons.mjs && node e2e/test-settings.mjs",
-    "test:unit": "tsx e2e/unit.ts"
+    "test:unit": "tsx e2e/unit.ts && tsx e2e/test-rate-limit.mts"
   },
   "dependencies": {
     "@fontsource-variable/public-sans": "^5.3.0",
@@ -30,6 +30,7 @@
     "drizzle-orm": "^0.45.4",
     "gifuct-js": "^2.1.2",
     "idb": "^8.0.4",
+    "ioredis": "^5.11.1",
     "katex": "^0.19.1",
     "lucide-react": "^1.74.0",
     "motion": "^14.14.0",

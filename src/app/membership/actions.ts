@@ -22,16 +22,17 @@ function failure(err: unknown, what: string): BillingActionState {
   return { error: `We couldn't reach our payment provider to ${what}. Please try again.` };
 }
 
-function tooMany(userId: string): BillingActionState | null {
-  if (limiters.billingByUser.consume(userId)) return null;
-  return { error: `Too many tries in a row. Wait ${limiters.billingByUser.retryAfter(userId)} seconds and try again.` };
+async function tooMany(userId: string): Promise<BillingActionState | null> {
+  const limit = await limiters.billingByUser.consume(userId);
+  if (limit.ok) return null;
+  return { error: `Too many tries in a row. Wait ${limit.retryAfter} seconds and try again.` };
 }
 
 /** Sends the signed-in user to Stripe Checkout to start (or restart) their membership. */
 export async function startMembership(): Promise<BillingActionState> {
   const user = await requireUser();
   if ((await readMembership(user.id)).isMember) redirect("/");
-  const limited = tooMany(user.id);
+  const limited = await tooMany(user.id);
   if (limited) return limited;
 
   let url: string | null;
@@ -64,7 +65,7 @@ export async function manageBilling(): Promise<BillingActionState> {
     .where(eq(users.id, user.id))
     .limit(1);
   if (!row?.customerId) return { error: "There's no billing account for you yet." };
-  const limited = tooMany(user.id);
+  const limited = await tooMany(user.id);
   if (limited) return limited;
 
   let url: string;

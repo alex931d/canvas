@@ -8,16 +8,19 @@
  */
 export const MEMBERSHIP = {
   productName: "canvas membership",
-  /** In the currency's smallest unit: 100 cents. */
-  unitAmount: 100,
+  /** In the currency's smallest unit: 500 cents. */
+  unitAmount: 500,
   currency: "usd",
   interval: "month",
   /** Lets the setup script find the price again instead of making another. */
   lookupKey: "canvas_membership_monthly",
   /** How the price reads on the site. */
-  price: "$1",
+  price: "$5",
   per: "a month",
 } as const;
+
+/** About what a membership costs a day, in cents (a month taken as 30 days). */
+export const CENTS_A_DAY = Math.round(MEMBERSHIP.unitAmount / 30);
 
 /** What a membership includes, for the landing and membership pages. */
 export const MEMBERSHIP_INCLUDES = [

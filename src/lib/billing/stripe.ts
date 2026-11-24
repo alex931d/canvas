@@ -6,7 +6,7 @@ import Stripe from "stripe";
  * The Stripe client and settings, from the environment:
  *
  *   STRIPE_SECRET_KEY      sk_test_... or sk_live_...
- *   STRIPE_PRICE_ID        price_... for the $1/month membership (npm run stripe:setup)
+ *   STRIPE_PRICE_ID        price_... for the $5/month membership (npm run stripe:setup)
  *   STRIPE_WEBHOOK_SECRET  whsec_... from `stripe listen` or the Dashboard's webhook endpoint
  *
  * STRIPE_API_BASE is for the e2e tests only: it points the SDK at the local

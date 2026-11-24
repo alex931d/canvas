@@ -38,7 +38,7 @@ export async function verifyEmail(_prev: VerifyState, formData: FormData): Promi
   if (user.emailVerified) redirect(next);
 
   const raw = str(formData.get("code")).slice(0, 32);
-  if (!limiters.codeChecksByUser.consume(user.id)) {
+  if (!(await limiters.codeChecksByUser.consume(user.id)).ok) {
     return { error: "Too many tries. Wait a minute and try again.", code: raw };
   }
   const code = normalizeCode(raw);
@@ -80,7 +80,7 @@ export type ForgotState = { error?: string; emailError?: string; email?: string;
 export async function requestPasswordReset(_prev: ForgotState, formData: FormData): Promise<ForgotState> {
   const email = normalizeEmail(str(formData.get("email")));
   const ip = await clientIp();
-  if (!limiters.resetRequestsByIp.consume(ip)) {
+  if (!(await limiters.resetRequestsByIp.consume(ip)).ok) {
     return { error: "Too many requests from this network. Wait a minute and try again.", email };
   }
   const human = await verifyCaptcha(formData, "reset");
@@ -115,7 +115,7 @@ export async function setNewPassword(_prev: ResetState, formData: FormData): Pro
   const confirm = str(formData.get("confirm"));
 
   const ip = await clientIp();
-  if (!limiters.passwordResetsByIp.consume(ip)) {
+  if (!(await limiters.passwordResetsByIp.consume(ip)).ok) {
     return { error: "Too many attempts from this network. Wait a few seconds and try again." };
   }
   if (!(await findResetLink(token))) return { expired: true };
@@ -129,7 +129,7 @@ export async function setNewPassword(_prev: ResetState, formData: FormData): Pro
   const user = await resetPassword(token, await hashPassword(password));
   if (!user) return { expired: true };
 
-  limiters.loginByAccount.reset(user.email);
+  await limiters.loginByAccount.reset(user.email);
   await setSessionCookie(await createSession(user.id));
   const origin = await emailLinkOrigin();
   sendEmailLater({

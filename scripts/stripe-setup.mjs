@@ -1,4 +1,4 @@
-// Creates the membership's product and $1/month price in your Stripe account
+// Creates the membership's product and $5/month price in your Stripe account
 // (what `npm run stripe:setup` runs), then prints the STRIPE_PRICE_ID to use.
 //
 // Safe to run again: it finds the price by its lookup key instead of making

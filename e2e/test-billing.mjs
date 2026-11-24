@@ -77,7 +77,7 @@ await clickAndWait(visitor, "header a[href='/pricing']");
 const visitorText = await text(visitor);
 check(
   "Pricing on the landing page opens /pricing with the plan",
-  path(visitor) === "/pricing" && /\$1\s*a month/.test(visitorText) && /Live drawing with other members/.test(visitorText),
+  path(visitor) === "/pricing" && /\$5\s*a month/.test(visitorText) && /Live drawing with other members/.test(visitorText),
 );
 check(
   "visitors are asked to create an account, or log in and come back",
@@ -109,7 +109,11 @@ const landed = !!(await landsOn(page, "/pricing"));
 // The plan card's button streams in after the page itself.
 const startButton = await page.waitForSelector(button("Start membership"), { timeout: 10_000 }).catch(() => null);
 check("confirming the email goes on to the pricing page", landed && !!startButton, path());
-check("it shows the $1 a month price", /\$1\s*a month/.test(await text()));
+check("it shows the $5 a month price", /\$5\s*a month/.test(await text()));
+check(
+  "before checkout, it says starting a membership means agreeing to the terms",
+  /By\s+starting a membership you agree to the\s+terms of service/.test(await text()) && !!(await page.$("a[href='/terms#membership']")),
+);
 check("and marks starting the membership as next", (await currentStep()) === "Start your membership", await currentStep());
 await page.goto(BASE, { waitUntil: "networkidle0" });
 check("the drawings send non-members to /pricing", !!(await landsOn(page, "/pricing")), path());
