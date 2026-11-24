@@ -118,7 +118,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/drawings/[i
         rows.push({ drawingId: id, version, batchId: batch.id, clientId: body.clientId, userId: user.id, ops: batch.ops });
         versions.push({ id: batch.id, version });
       }
-      if (rows.length === 0) return { versions, version };
+      if (rows.length === 0) return { versions, version, added: 0 };
 
       const data = drawingDataSchema.safeParse({ version: 2, background: current.background, elements });
       if (!data.success) throw new HttpError(413, "This drawing is full (20,000 items). Remove some to add more.");
@@ -131,15 +131,16 @@ export async function POST(request: Request, ctx: RouteContext<"/api/drawings/[i
         user.id,
         finishedCards(current.elements, elements).map((cardId) => ({ kind: "task", ref: `${id}:${cardId}` })),
       );
-      await notify({ t: "change", d: id }, tx);
       if (Math.floor(version / 100) !== Math.floor((version - rows.length) / 100)) {
         await tx
           .delete(drawingChanges)
           .where(and(eq(drawingChanges.drawingId, id), lt(drawingChanges.version, sql`${version - KEEP_CHANGES}`)));
       }
-      return { versions, version };
+      return { versions, version, added: rows.length };
     });
-    return Response.json(result);
+    // After the commit, so the streams told about it can read it.
+    if (result.added) await notify({ t: "change", d: id });
+    return Response.json({ versions: result.versions, version: result.version });
   } catch (err) {
     if (err instanceof HttpError) return Response.json({ error: err.message }, { status: err.status });
     console.error("[changes] failed", err);

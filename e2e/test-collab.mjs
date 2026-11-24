@@ -1,7 +1,8 @@
 // Live collaboration, end to end, with three people in separate browsers:
-// sharing by link (members only), live edits both ways, cursors, per-person
-// undo, offline edits merging, roles, removal, leaving, deleting, and the
-// API refusing people without access. Run against `npm start`.
+// sharing by link (members only), live edits both ways, cursors (sent only
+// while someone else is there), per-person undo, offline edits merging,
+// roles, removal, leaving, deleting, and the API refusing people without
+// access. Run against `npm start`, with any REALTIME_BUS.
 import puppeteer from "puppeteer-core";
 import nextEnv from "@next/env";
 
@@ -61,6 +62,22 @@ const menuItem = async (p, text) => {
   const [item] = await p.$$(`xpath/.//div[@role='menuitem'][normalize-space()='${text}']`);
   await item.click();
 };
+/** Count a page's cursor requests until the returned function is called. */
+function countCursorPosts(p) {
+  let n = 0;
+  const on = (r) => r.method() === "POST" && /\/presence$/.test(r.url()) && n++;
+  p.on("request", on);
+  return () => {
+    p.off("request", on);
+    return n;
+  };
+}
+async function wander(p, moves = 40) {
+  for (let i = 0; i < moves; i++) {
+    await p.mouse.move(500 + 200 * Math.sin(i / 6), 500 + 120 * Math.cos(i / 7));
+    await sleep(40);
+  }
+}
 /** Status of a request made from the page (with its cookies). */
 const fetchStatus = (p, url, init) =>
   p.evaluate(async (url, init) => (await fetch(url, init)).status, url, init ?? {});
@@ -74,6 +91,9 @@ await synced(a);
 await tool(a, "Pen");
 await drag(a, [[160, 300], [220, 260], [280, 320]]);
 await synced(a);
+let cursorPosts = countCursorPosts(a);
+await wander(a);
+check("alone in a drawing, moving the cursor sends nothing", cursorPosts() <= 1, `${cursorPosts()} sent`);
 
 await openShare(a);
 check("link sharing starts off", !(await a.$("[aria-label='Invite link']")));
@@ -117,6 +137,9 @@ check(
     return /Maya Chen/.test((await b.$eval("[data-testid=peers]", (e) => e.getAttribute("aria-label")).catch(() => "")) ?? "");
   }, 5000),
 );
+cursorPosts = countCursorPosts(a);
+await wander(a);
+check("with someone else there, cursor moves are sent", cursorPosts() >= 10, `${cursorPosts()} sent`);
 
 // two people moving different things at the same time
 await synced(a);
@@ -281,6 +304,10 @@ check("and their access", sql(`select count(*) from drawing_members where drawin
 await openShare(c);
 await Promise.all([c.waitForNavigation({ waitUntil: "networkidle0" }), c.click("[role=dialog] form button[type=submit]")]);
 check("people can leave a drawing shared with them", new URL(c.url()).pathname === "/" && sql(`select count(*) from drawing_members where drawing_id='${id}' and user_id='${sam.id}'`) === "0");
+await sleep(700); // their goodbyes arrive
+cursorPosts = countCursorPosts(a);
+await wander(a);
+check("once everyone else has gone, cursor moves stay in the browser again", cursorPosts() <= 1, `${cursorPosts()} sent`);
 
 // owner deletes it while someone is looking
 await c.goto(link, { waitUntil: "networkidle0" });

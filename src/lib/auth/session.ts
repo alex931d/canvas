@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import { sha256 } from "@oslojs/crypto/sha2";
 import { constantTimeEqual } from "@oslojs/crypto/subtle";
 import { eq } from "drizzle-orm";
@@ -127,11 +128,13 @@ export async function validateSessionToken(token: string): Promise<ValidationRes
 
 export async function invalidateSession(sessionId: string) {
   await db.delete(sessions).where(eq(sessions.id, sessionId));
+  for (const [key, hit] of recentSessions) if (hit.sessionId === sessionId) recentSessions.delete(key);
 }
 
 /** Sign a user out everywhere (e.g. after a password change). */
 export async function invalidateUserSessions(userId: string) {
   await db.delete(sessions).where(eq(sessions.userId, userId));
+  for (const [key, hit] of recentSessions) if (hit.user.id === userId) recentSessions.delete(key);
 }
 
 // ------------------------------------------------------------- cookies
@@ -165,6 +168,30 @@ export const getCurrentSession = cache(async (): Promise<ValidationResult> => {
   if (!token) return { session: null, user: null };
   return validateSessionToken(token);
 });
+
+type RecentSession = { sessionId: string; user: SessionUser; at: number };
+const gs = globalThis as unknown as { canvasRecentSessions?: Map<string, RecentSession> };
+const recentSessions = (gs.canvasRecentSessions ??= new Map());
+
+/**
+ * For requests that come many times a second and carry nothing to protect
+ * (cursor positions): the signed-in user, remembered by this server for
+ * `maxAgeMs` instead of read from the database every time. Signing out on
+ * this server forgets it at once; on another server, within `maxAgeMs`.
+ * Keyed by a hash of the token, so no tokens are kept.
+ */
+export async function getRecentSessionUser(maxAgeMs = 10_000): Promise<SessionUser | null> {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  if (!token) return null;
+  const key = createHash("sha256").update(token).digest("base64url");
+  const hit = recentSessions.get(key);
+  if (hit && Date.now() - hit.at < maxAgeMs) return hit.user;
+  const { session, user } = await validateSessionToken(token);
+  if (recentSessions.size > 5000) recentSessions.clear();
+  if (session) recentSessions.set(key, { sessionId: session.id, user, at: Date.now() });
+  else recentSessions.delete(key);
+  return user;
+}
 
 /**
  * For pages and Server Actions: the user, or a redirect to the login page.

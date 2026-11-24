@@ -16,7 +16,8 @@ services:
       timeout: 3s
       retries: 20
 
-  # Rate limits (REDIS_URL=redis://localhost:6379). Optional on your machine.
+  # Rate limits and the realtime bus between app servers (REDIS_URL=redis://localhost:6379).
+  # Optional on your machine.
   redis:
     image: redis:7-alpine
     restart: unless-stopped

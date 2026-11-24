@@ -518,7 +518,9 @@ How it works (`src/lib/collab`):
 
 ```
  edit ──► batch of ops (add / set / del per element) ──► shown at once, kept in IndexedDB
-      ──► POST /api/drawings/[id]/changes  (row lock, next version, drawing_changes row, NOTIFY)
+      ──► POST /api/drawings/[id]/changes  (row lock, next version, drawing_changes row)
+      ──► after the commit: "drawing X changed" to this server's streams, and to other servers
+          through the realtime bus (local / Redis / Postgres, see below)
       ──► every open editor: GET /api/drawings/[id]/events  (Server-Sent Events, in version order)
 ```
 
@@ -527,13 +529,59 @@ How it works (`src/lib/collab`):
 - The server applies batches one at a time under a row lock and numbers them; a retried batch id is
   applied once. Each editor shows the server's state plus its own unconfirmed batches on top, and
   replays them when other people's changes arrive, so everyone converges.
-- Live updates are Server-Sent Events. Each server process holds one Postgres connection that
-  `LISTEN`s for changes and fans them out, so it works with several app servers. Editors that fall
-  behind the kept history (2,000 changes per drawing) reload the drawing.
-- Cursors and selections travel the same way but aren't stored. Undo and redo only reverse your own
-  changes, and skip anything someone else has changed since.
+- Live updates are Server-Sent Events. Each server keeps its open streams in memory and reads changes
+  from `drawing_changes` in version order, so a late, doubled or lost message can't make anyone skip
+  or repeat a change. Editors that fall behind the kept history (2,000 changes per drawing) reload
+  the drawing.
+- Cursors and selections travel the same way but aren't stored, and only while someone else is
+  there (below). Undo and redo only reverse your own changes, and skip anything someone else has
+  changed since.
 - Viewers can look, follow along, check math and make flashcards; the server refuses their changes.
   Removing someone or deleting the drawing ends their live view at once.
+
+### Live traffic, and keeping it cheap
+
+Edits are few: one request per stroke or move, batched, and they have to reach Postgres anyway to be
+kept. Cursors are the flood: up to 12 updates a second while the mouse moves. Three things keep them
+cheap:
+
+- **Cursors are only sent when someone else is looking.** A tab says hello when it opens a drawing,
+  and everyone already there answers with where they are. Alone, a tab sends nothing as you move,
+  just a check-in every 30 s (in case an arrival was missed); with company, it sends your moves and
+  a "still here" every 10 s; when the last other person leaves (their goodbye, or 35 s of silence),
+  it goes quiet again. Measured: 23 s of drawing alone used to send 194 cursor requests; now 0.
+  Your own other tabs don't count as company, since they don't show your cursor.
+- **A cursor update doesn't touch the database.** The presence route remembers who you are and
+  whether you can see the drawing for 10 s, and counts its rate limit in memory, so 200 updates cost
+  3 database reads (the checks, once) instead of 200 session lookups and 200 `NOTIFY`s.
+- **Each server delivers to its own viewers from memory**, and only hands events to the
+  **realtime bus** for viewers on other servers (`src/lib/collab/bus.ts`). Pick it with
+  `REALTIME_BUS`:
+
+| `REALTIME_BUS` | For | Costs |
+| --- | --- | --- |
+| `local` | one app server (a VPS, one container) | nothing: no Redis, no database work for cursors |
+| `redis` (default with `REDIS_URL`) | several app servers | one Redis `PUBLISH` per event, nothing stored |
+| `postgres` (default without) | several app servers, no Redis | one database round trip per event, cursors included |
+
+Every server's messages carry its id, so it ignores its own when the bus brings them back. After the
+bus reconnects, and every 30 s when there is a bus, each server re-reads what its viewers may have
+missed, so changes are never lost to a dropped message (cursors simply move again).
+
+Which is cheapest depends on how you host:
+
+- **One server:** `REALTIME_BUS=local`. Live editing needs a long-running server anyway, and with
+  one, a bus has nothing to do.
+- **Several servers, self-hosted Redis** (the `docker-compose.yml` one, or Redis on your VPS):
+  `redis`. Pub/sub is what Redis is fast at, and it keeps cursors off your database.
+- **Several servers, pay-per-request Redis** (e.g. Upstash's pay-as-you-go plans): every cursor
+  update is a billed command, and one person moving for an hour can send ~45,000. Use a fixed-price
+  plan, or `postgres` if your database has room. The rate limits use one Redis command per request either way (except cursors, counted in memory).
+
+Edits deliberately don't go through Redis on their way to Postgres: it would add a second copy to
+keep consistent and a way to lose work, and save little, since edits are batched and few. Cursor
+updates stay ordinary POSTs: on HTTP/2 they share one connection with the event stream, and
+WebSockets would need a custom server in front of Next.js.
 
 ## To-do boards, GIFs and videos
 
@@ -977,7 +1025,9 @@ src/
     collab/ops.ts                per-element operations and applyOps (client and server)
     collab/doc.ts                one tab's view: server state + pending batches, per-person undo
     collab/sync-client.ts        sending batches, the live stream, presence
-    collab/hub.ts                server: LISTEN connection and event fan-out
+    collab/hub.ts                server: each process's open streams, change delivery in order
+    collab/bus.ts                realtime bus between servers: local, Redis pub/sub or LISTEN/NOTIFY
+    collab/notify.ts             live events: to this server's streams, then the bus
     collab/access.ts             roles: owner, editor, viewer
     math/mathjax-engine.ts       MathJax 4 (loaded on demand): TeX/mhchem -> drawing operations
     math/layout.ts               typeset cache and drawing for equations
@@ -1184,10 +1234,17 @@ it. `e2e/mock-mail.mjs` keeps every email the app sends, for the tests to read c
   walks the whole fallback chain, including pasting an image when nothing fits locally.
 - `e2e/test-input.mjs` (6 checks): real pen pressure, two-finger pinch zoom, and opening a version 1
   drawing.
-- `e2e/test-collab.mjs` (37 checks): three people in three browsers. Invite links (members
-  only), live edits both ways, cursors, simultaneous moves, per-person undo, live renames, shared
+- `e2e/test-collab.mjs` (40 checks): three people in three browsers. Invite links (members
+  only), live edits both ways, cursors (none sent while alone; sent with company; quiet again once
+  everyone else has left), simultaneous moves, per-person undo, live renames, shared
   images, offline edits merging, view-only roles enforced by the server, outsiders getting nothing,
   new links, catching up after the history was pruned, the gallery, removing, leaving and deleting.
+  Passes with every `REALTIME_BUS`.
+- `e2e/test-realtime-bus.mjs` (9 checks, not in `test:e2e`: it needs a second server): one person on
+  each of two app servers sharing a database. Shapes, cursors, a rename, a goodbye and a removal all
+  cross between the servers, and a change made while the bus is reconnecting still arrives. Start the second with `PORT=3001 npm start` (same environment, with
+  `REALTIME_BUS=redis` or `postgres`), then `SECOND_URL=http://localhost:3001 node
+  e2e/test-realtime-bus.mjs`. With `local` it fails, as it should.
 - `e2e/test-study.mjs` (43 checks): equations (LaTeX errors, typesetting, chemistry, editing), graphs
   (parse errors, Fit, saving, drawing), the chemistry panel (molar mass, conversion, balancing ionic
   equations, the periodic table), flashcards from a selection, review and scheduling on `/study`,
@@ -1302,9 +1359,10 @@ membership is what's being tested). They need Chrome (`CHROME_PATH` if it isn't
 - **Uploads pass through `src/proxy.ts`**, and Next keeps only `experimental.proxyClientMaxBodySize`
   of a request body for it (52 MB in `next.config.ts`, for 50 MB videos). Raise both together.
 - **Live collaboration needs a long-running server** (`next start`, a container, a VM): the event
-  stream is a response that stays open, which serverless functions cut off. Each server process opens
-  one extra Postgres connection for `LISTEN`; behind a proxy, make sure it doesn't buffer
-  `text/event-stream` responses (the app sends `X-Accel-Buffering: no` for nginx).
+  stream is a response that stays open, which serverless functions cut off. With one server, set
+  `REALTIME_BUS=local`; with several, each opens one extra connection for the bus (Redis, or Postgres
+  for `LISTEN`; see [Live traffic](#live-traffic-and-keeping-it-cheap)). Behind a proxy, make sure it
+  doesn't buffer `text/event-stream` responses (the app sends `X-Accel-Buffering: no` for nginx).
 - **Strokes appear for others when they're finished**, not while they're being drawn; cursors move
   live.
 - `npm audit` flags esbuild's dev server, pulled in by `drizzle-kit`; drizzle-kit doesn't run it.

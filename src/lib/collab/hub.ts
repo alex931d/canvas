@@ -1,21 +1,22 @@
 import "server-only";
 
-import { and, asc, eq, gt } from "drizzle-orm";
-import { Client } from "pg";
+import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { drawingChanges } from "@/db/schema";
+import { drawingChanges, drawings } from "@/db/schema";
 import { getRole, type Role } from "./access";
-import { CHANNEL, type HubMessage } from "./notify";
+import { bus } from "./bus";
+import type { HubMessage } from "./notify";
 
 /**
- * One per server process: holds a dedicated Postgres connection that
- * LISTENs for drawing events, and fans them out to the open event streams
+ * One per server process: fans drawing events out to the open event streams
  * (GET /api/drawings/[id]/events) of the people looking at each drawing.
+ * Events come from this server (notify) and from the others (the bus).
  *
  * Changes are read from drawing_changes in version order and each stream
  * remembers the last version it sent, so a stream never skips or repeats a
- * change, even when notifications arrive late, twice, or after the LISTEN
- * connection drops and comes back.
+ * change, even when events arrive late, twice, or not at all: after the bus
+ * reconnects, and every 30 s when there are other servers, every stream is
+ * caught up from the database.
  */
 
 export type Subscriber = {
@@ -30,17 +31,16 @@ export type Subscriber = {
 };
 
 const BATCH = 200;
+const SWEEP_MS = 30_000;
 
 class Hub {
-  private listener: Client | null = null;
-  private starting: Promise<void> | null = null;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private subs = new Map<string, Set<Subscriber>>();
   private delivering = new Map<string, { again: boolean }>();
+  private sweep: ReturnType<typeof setInterval> | null = null;
 
   /** Start following a drawing. Sends anything after `lastVersion` right away. */
   async subscribe(sub: Subscriber): Promise<() => void> {
-    await this.start();
+    this.start();
     let set = this.subs.get(sub.drawingId);
     if (!set) this.subs.set(sub.drawingId, (set = new Set()));
     set.add(sub);
@@ -58,53 +58,46 @@ class Hub {
     return n;
   }
 
-  private async start() {
-    if (this.listener) return;
-    this.starting ??= (async () => {
-      const client = new Client({ connectionString: process.env.DATABASE_URL });
-      client.on("notification", (msg) => this.onMessage(msg.payload));
-      client.on("error", (err) => {
-        console.warn("[collab] LISTEN connection error:", err.message);
-        this.drop(client);
-      });
-      client.on("end", () => this.drop(client));
-      await client.connect();
-      await client.query(`LISTEN ${CHANNEL}`);
-      this.listener = client;
-    })().finally(() => {
-      this.starting = null;
-    });
-    await this.starting;
-  }
-
-  /** Lost the LISTEN connection: reconnect, then catch every stream up. */
-  private drop(client: Client) {
-    if (this.listener !== client) return;
-    this.listener = null;
-    client.end().catch(() => {});
-    this.scheduleReconnect(1000);
-  }
-
-  private scheduleReconnect(delay: number) {
-    if (this.reconnectTimer || this.subs.size === 0) return;
-    this.reconnectTimer = setTimeout(async () => {
-      this.reconnectTimer = null;
-      try {
-        await this.start();
-        for (const drawingId of this.subs.keys()) void this.deliver(drawingId);
-      } catch {
-        this.scheduleReconnect(Math.min(delay * 2, 15_000));
-      }
-    }, delay);
-  }
-
-  private onMessage(payload: string | undefined) {
-    let msg: HubMessage;
-    try {
-      msg = JSON.parse(payload ?? "");
-    } catch {
-      return;
+  private start() {
+    bus.listen({ message: (msg) => this.receive(msg), connected: () => void this.catchUp() });
+    // A lost bus message only delays a change until the next one; this
+    // bounds the delay when there is no next one.
+    if (bus.kind !== "local" && !this.sweep) {
+      this.sweep = setInterval(() => void this.catchUp(), SWEEP_MS);
+      this.sweep.unref?.();
     }
+  }
+
+  /**
+   * Send every stream anything it may have missed: one query for the
+   * current versions of all open drawings, then reads only where something
+   * is new. Streams of drawings that no longer exist are closed.
+   */
+  private async catchUp() {
+    const ids = [...this.subs.keys()];
+    try {
+      for (let i = 0; i < ids.length; i += 500) {
+        const chunk = ids.slice(i, i + 500);
+        const rows = await db
+          .select({ id: drawings.id, version: drawings.version })
+          .from(drawings)
+          .where(inArray(drawings.id, chunk));
+        const versions = new Map(rows.map((r) => [r.id, r.version]));
+        for (const id of chunk) {
+          const subs = this.subs.get(id);
+          if (!subs) continue;
+          const version = versions.get(id);
+          if (version === undefined) this.receive({ t: "deleted", d: id });
+          else if ([...subs].some((s) => s.lastVersion < version)) void this.deliver(id);
+        }
+      }
+    } catch (err) {
+      console.warn("[collab] couldn't catch up", err);
+    }
+  }
+
+  /** An event for a drawing, from this server or another. */
+  receive(msg: HubMessage) {
     const subs = this.subs.get(msg.d);
     if (!subs?.size) return;
     switch (msg.t) {
@@ -199,6 +192,6 @@ class Hub {
   }
 }
 
-const g = globalThis as unknown as { canvasHub?: Hub };
+const g = globalThis as unknown as { canvasLiveHub?: Hub };
 /** Shared across hot reloads in development. */
-export const hub = (g.canvasHub ??= new Hub());
+export const hub = (g.canvasLiveHub ??= new Hub());

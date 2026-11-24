@@ -34,6 +34,13 @@ if (!redis && process.env.NODE_ENV === "production" && process.env.NEXT_PHASE !=
 const bucket = (name: string, max: number, refillSeconds: number): TokenBucket =>
   redis ? new RedisTokenBucket(redis, name, max, refillSeconds) : new MemoryTokenBucket(max, refillSeconds);
 
+/**
+ * Kept in this server's memory even with Redis: for very frequent requests
+ * where a Redis round trip each would cost more than the limit is worth.
+ * With several servers, someone could get the limit once per server.
+ */
+const localBucket = (max: number, refillSeconds: number): TokenBucket => new MemoryTokenBucket(max, refillSeconds);
+
 const throttler = (name: string, timeoutSeconds: number[]): Throttler =>
   redis ? new RedisThrottler(redis, name, timeoutSeconds) : new MemoryThrottler(timeoutSeconds);
 
@@ -63,8 +70,8 @@ function makeLimiters() {
     billingByUser: bucket("billingByUser", 10, 10),
     /** Drawing changes: bursts of 120 requests, then 5 a second, per user. */
     changesByUser: bucket("changesByUser", 120, 0.2),
-    /** Cursor updates: bursts of 60, then 20 a second, per user. */
-    presenceByUser: bucket("presenceByUser", 60, 0.05),
+    /** Cursor updates: bursts of 60, then 20 a second, per user (per server: see localBucket). */
+    presenceByUser: localBucket(60, 0.05),
     /** Flashcards made: 60, then one every 2 s, per user. */
     flashcardsByUser: bucket("flashcardsByUser", 60, 2),
     /** Images, GIFs and videos uploaded: 100, then one every 6 s, per user. */
