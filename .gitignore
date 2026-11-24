@@ -45,3 +45,6 @@ next-env.d.ts
 
 # throwaway scripts and their output
 /e2e/.scratch/
+
+# database backups on the server (deploy/compose.yml)
+/deploy/backups/

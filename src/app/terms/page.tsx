@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { connection } from "next/server";
 import { Suspense } from "react";
 import { HeaderAccount } from "@/components/landing/header-account";
 import { INNER, linkFocus, OUTER, SiteFooter, SiteHeader } from "@/components/landing/site-chrome";
@@ -27,7 +28,8 @@ export const metadata: Metadata = {
  * Who to write to: CONTACT_EMAIL, else the address in EMAIL_FROM ("canvas <hello@…>") unless it's a
  * no-reply one. Set CONTACT_EMAIL in production: without an address, the page can only say "by email".
  */
-function contactEmail(): string | null {
+async function contactEmail(): Promise<string | null> {
+  await connection(); // read when the page is served, so a Docker image built without .env shows it
   const explicit = process.env.CONTACT_EMAIL?.trim();
   if (explicit) return explicit;
   const from = process.env.EMAIL_FROM?.trim() ?? "";
@@ -68,8 +70,23 @@ function Section({ id, children }: { id: SectionId; children: React.ReactNode })
   );
 }
 
+const NO_ADDRESS = "Questions about these terms, or want your account closed? Contact us by email.";
+
+async function ContactLine() {
+  const contact = await contactEmail();
+  if (!contact) return NO_ADDRESS;
+  return (
+    <>
+      Questions about these terms, or want your account closed? Write to us at{" "}
+      <a href={`mailto:${contact}`} className={link}>
+        {contact}
+      </a>
+      .
+    </>
+  );
+}
+
 export default function TermsPage() {
-  const contact = contactEmail();
   return (
     <div className="flex min-h-dvh flex-col">
       <SiteHeader
@@ -283,17 +300,9 @@ export default function TermsPage() {
 
               <Section id="contact">
                 <p>
-                  {contact ? (
-                    <>
-                      Questions about these terms, or want your account closed? Write to us at{" "}
-                      <a href={`mailto:${contact}`} className={link}>
-                        {contact}
-                      </a>
-                      .
-                    </>
-                  ) : (
-                    "Questions about these terms, or want your account closed? Contact us by email."
-                  )}
+                  <Suspense fallback={NO_ADDRESS}>
+                    <ContactLine />
+                  </Suspense>
                 </p>
               </Section>
             </article>
