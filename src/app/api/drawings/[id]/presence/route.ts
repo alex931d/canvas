@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getCurrentSession } from "@/lib/auth/session";
+import { getRecentSessionUser } from "@/lib/auth/session";
 import { limiters } from "@/lib/auth/rate-limit";
 import { getMembership } from "@/lib/billing/membership";
 import { getRole } from "@/lib/collab/access";
@@ -8,8 +8,11 @@ import { clientIdSchema } from "@/lib/collab/route-auth";
 
 /**
  * Where someone's cursor is and what they have selected, passed straight on
- * to the others looking at the drawing. Nothing is stored. Access is cached
- * for a few seconds because cursors move many times a second.
+ * to the others looking at the drawing. Nothing is stored. Browsers only
+ * send these while someone else has the drawing open, but then many times a
+ * second, so the sign-in and access checks are remembered for 10 s and the
+ * rate limit is counted in this server's memory: a cursor update normally
+ * touches neither the database nor Redis, only the realtime bus.
  */
 
 const coord = z.number().finite().min(-1e7).max(1e7);
@@ -38,7 +41,7 @@ async function mayView(drawingId: string, userId: string): Promise<boolean> {
 }
 
 export async function POST(request: Request, ctx: RouteContext<"/api/drawings/[id]/presence">) {
-  const { user } = await getCurrentSession();
+  const user = await getRecentSessionUser(ACCESS_TTL_MS);
   if (!user) return new Response(null, { status: 401 });
   const { id } = await ctx.params;
   if (!(await mayView(id, user.id))) return new Response(null, { status: 404 });

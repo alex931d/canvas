@@ -1,15 +1,19 @@
 import "server-only";
 
-import { sql } from "drizzle-orm";
-import { db } from "@/db";
+import { bus } from "./bus";
+import { hub } from "./hub";
 
 /**
- * Events between server processes go through Postgres LISTEN/NOTIFY on one
- * channel, so live collaboration works with any number of app servers.
- * Payloads stay small (Postgres caps them at 8000 bytes): changes are only
- * announced here; the hub reads them from drawing_changes.
+ * Live events for the people looking at a drawing. `notify` hands them to
+ * this server's open streams straight away (from memory) and to the other
+ * app servers through the bus (src/lib/collab/bus.ts). Changes themselves
+ * aren't in the message: the hub reads them from drawing_changes, so a
+ * message can be small, late, doubled or lost without anyone missing a
+ * change.
+ *
+ * Call it after the database work has committed, never inside a
+ * transaction: a stream told about a change must be able to read it.
  */
-export const CHANNEL = "drawing_events";
 
 export type HubMessage =
   /** New rows in drawing_changes. */
@@ -35,9 +39,7 @@ export type HubMessage =
   /** The owner deleted the drawing. */
   | { t: "deleted"; d: string };
 
-type Executor = { execute: typeof db.execute };
-
-/** Send a message; inside a transaction it goes out when that commits. */
-export async function notify(message: HubMessage, executor: Executor = db) {
-  await executor.execute(sql`select pg_notify(${CHANNEL}, ${JSON.stringify(message)})`);
+export async function notify(message: HubMessage) {
+  hub.receive(message);
+  await bus.publish(message);
 }

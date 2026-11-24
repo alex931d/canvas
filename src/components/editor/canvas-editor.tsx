@@ -253,6 +253,7 @@ export function CanvasEditor({
         sync = new DrawingSync({
           drawingId: id,
           clientId,
+          userId: user.id,
           doc,
           images: () => cache,
           canEdit: () => !readOnlyRef.current,

@@ -11,6 +11,11 @@ import { assetIdsIn, type DocOp } from "./ops";
  *  - follows the live stream (/events) and feeds every change to the doc,
  *    reloading the drawing if it ever falls behind;
  *  - shares this tab's cursor and selection, and passes on everyone else's.
+ *
+ * Cursors only go out while someone else has the drawing open: alone, a tab
+ * says hello when it connects and checks in every 30 s, and that's all. When
+ * someone arrives (their hello, or any message from a tab we didn't know),
+ * we answer with where we are, and from then on send every move.
  */
 
 export type ConnectionState = "connecting" | "live" | "offline" | "ended";
@@ -52,6 +57,8 @@ export type SyncEvents = {
 type Options = {
   drawingId: string;
   clientId: string;
+  /** Your own other tabs don't show each other's cursors, so they don't count as company. */
+  userId: string;
   doc: CollabDoc;
   images: () => AssetCache | null;
   canEdit: () => boolean;
@@ -59,8 +66,14 @@ type Options = {
 };
 
 const MAX_REQUEST_CHARS = 4_000_000;
+/** At most one cursor update per this many ms while moving. */
 const PRESENCE_INTERVAL_MS = 80;
+/** With company: "still here" at least this often (they forget us after 30 s). */
 const PRESENCE_HEARTBEAT_MS = 10_000;
+/** Alone: a check-in this often, in case someone's arrival was missed. */
+const PRESENCE_BEACON_MS = 30_000;
+/** Forget a tab we haven't heard from for this long. */
+const PEER_TIMEOUT_MS = 35_000;
 
 class RestartStream extends Error {}
 
@@ -90,14 +103,17 @@ export class DrawingSync {
   private presenceState: { cursor: { x: number; y: number } | null; selection: string[] } = { cursor: null, selection: [] };
   private presenceTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
+  private replyTimer: ReturnType<typeof setTimeout> | null = null;
   private lastPresenceAt = 0;
   private lastPresenceKey = "";
+  /** Other people's tabs on this drawing → when we last heard from each. */
+  private peers = new Map<string, number>();
 
   constructor(private readonly opts: Options) {}
 
   start() {
     void this.listen();
-    this.heartbeat = setInterval(() => void this.sendPresence(false, true), PRESENCE_HEARTBEAT_MS);
+    this.heartbeat = setInterval(() => this.checkIn(), 5000);
     this.scheduleSend(0);
   }
 
@@ -108,6 +124,7 @@ export class DrawingSync {
     if (this.sendTimer) clearTimeout(this.sendTimer);
     if (this.presenceTimer) clearTimeout(this.presenceTimer);
     if (this.heartbeat) clearInterval(this.heartbeat);
+    if (this.replyTimer) clearTimeout(this.replyTimer);
   }
 
   /** A new local batch: send it shortly (bursts go together). */
@@ -376,7 +393,7 @@ export class DrawingSync {
     switch (event) {
       case "hello":
         events.role(data.role as Role);
-        void this.sendPresence(true);
+        void this.sendPresence("hello");
         break;
       case "change": {
         const result = doc.applyRemote({ v: data.v as number, b: data.b as string, ops: data.ops as DocOp[] });
@@ -392,11 +409,7 @@ export class DrawingSync {
       case "presence": {
         const p = data as unknown as PresenceMessage;
         events.presence(p);
-        // Someone new: show ourselves to them straight away.
-        if (p.hello) {
-          this.lastPresenceKey = "";
-          setTimeout(() => void this.sendPresence(), 150 + Math.random() * 200);
-        }
+        this.notePeer(p);
         break;
       }
       case "meta":
@@ -443,35 +456,75 @@ export class DrawingSync {
 
   // --------------------------------------------------------------- presence
 
+  /** Is anyone else looking? Only then do cursor moves go out. */
+  get hasCompany() {
+    return this.peers.size > 0;
+  }
+
   /** This tab's cursor (world coordinates, null = off the canvas) and selection. */
   setPresence(cursor: { x: number; y: number } | null, selection: string[]) {
     this.presenceState = {
       cursor: cursor ? { x: Math.round(cursor.x * 10) / 10, y: Math.round(cursor.y * 10) / 10 } : null,
       selection: selection.slice(0, 50),
     };
-    if (this.presenceTimer) return;
+    // Alone: remember it for when someone arrives, send nothing.
+    if (this.presenceTimer || !this.hasCompany) return;
     const wait = Math.max(0, this.lastPresenceAt + PRESENCE_INTERVAL_MS - Date.now());
     this.presenceTimer = setTimeout(() => {
       this.presenceTimer = null;
-      void this.sendPresence();
+      void this.sendPresence("move");
     }, wait);
   }
 
-  private async sendPresence(hello = false, heartbeat = false) {
+  private notePeer(p: PresenceMessage) {
+    if (p.u === this.opts.userId || p.c === this.opts.clientId) return;
+    if (p.bye) {
+      this.peers.delete(p.c);
+      return;
+    }
+    const known = this.peers.has(p.c);
+    this.peers.set(p.c, Date.now());
+    // Someone new, or back after reconnecting: show ourselves to them now.
+    if (p.hello || !known) this.reply();
+  }
+
+  /** Answer an arrival, once even if several arrive together. */
+  private reply() {
+    if (this.replyTimer) return;
+    this.replyTimer = setTimeout(
+      () => {
+        this.replyTimer = null;
+        void this.sendPresence("always");
+      },
+      150 + Math.random() * 200,
+    );
+  }
+
+  /** Every 5 s: forget tabs that went quiet, and say we're still here when it's due. */
+  private checkIn() {
+    const now = Date.now();
+    for (const [c, at] of this.peers) if (now - at > PEER_TIMEOUT_MS) this.peers.delete(c);
+    const every = this.hasCompany ? PRESENCE_HEARTBEAT_MS : PRESENCE_BEACON_MS;
+    if (now - this.lastPresenceAt >= every - 500) void this.sendPresence("always");
+  }
+
+  /**
+   * "move": a cursor or selection change, sent only with company and only if
+   * something changed. "hello": just connected. "always": an answer or a
+   * check-in, sent as is.
+   */
+  private async sendPresence(kind: "move" | "hello" | "always") {
     if (this.stopped || this.ended || this.connection !== "live") return;
     const body = { clientId: this.opts.clientId, cursor: this.presenceState.cursor, selection: this.presenceState.selection };
     const key = JSON.stringify(body);
-    const now = Date.now();
-    if (!hello && key === this.lastPresenceKey && (!heartbeat || now - this.lastPresenceAt < PRESENCE_HEARTBEAT_MS - 500)) {
-      return;
-    }
+    if (kind === "move" && (!this.hasCompany || key === this.lastPresenceKey)) return;
     this.lastPresenceKey = key;
-    this.lastPresenceAt = now;
+    this.lastPresenceAt = Date.now();
     try {
       await fetch(`/api/drawings/${this.opts.drawingId}/presence`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(hello ? { ...body, hello: true } : body),
+        body: JSON.stringify(kind === "hello" ? { ...body, hello: true } : body),
         keepalive: true,
       });
     } catch {

@@ -4,7 +4,9 @@ import Redis from "ioredis";
 /**
  * The Redis connection, from REDIS_URL (redis://… or rediss://… for TLS, as
  * Upstash, Redis Cloud and most hosts give it). Used for rate limiting
- * (src/lib/auth/rate-limit.ts). Null without REDIS_URL.
+ * (src/lib/auth/rate-limit.ts) and, by default, as the realtime bus between
+ * app servers (src/lib/collab/bus.ts, which opens a second connection for
+ * subscribing). Null without REDIS_URL.
  *
  * One connection per server process, kept across dev hot reloads. Commands
  * give up after a second, so a Redis outage slows nothing down for long.
