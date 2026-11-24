@@ -1,0 +1,18 @@
+# HTTPS in front of the app. Caddy gets a certificate for DOMAIN from
+# Let's Encrypt on first start (the domain's DNS must already point at this
+# server) and renews it by itself; http:// is redirected to https://.
+#
+# It passes the client's address on in X-Forwarded-For (and ignores one sent
+# by the client), which the per-IP rate limits rely on. The live event stream
+# (text/event-stream) is sent on as it's written, which Caddy does by itself.
+
+{$DOMAIN} {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		-Server
+	}
+
+	reverse_proxy app:3000
+}

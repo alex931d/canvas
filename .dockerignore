@@ -1,0 +1,17 @@
+# What the Docker build never sees: secrets, local state, and anything the
+# image builds or installs itself.
+**/.env*
+!**/.env.example
+.git
+node_modules
+.next
+out
+coverage
+*.tsbuildinfo
+next-env.d.ts
+e2e/.scratch
+deploy/backups
+backups
+*.pem
+*.log
+.DS_Store

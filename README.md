@@ -56,6 +56,8 @@ animation, and its own component kit (with Radix underneath for menus and dialog
   searchable, paged table of accounts (with the search, filters, page and open account all in the
   address) where they edit names, emails, roles, email confirmation and complimentary memberships, sign
   people out and send reset links, with a history of every change (see below).
+- **Deploying**: one command puts it all on a single small VPS, HTTPS and nightly backups included (see
+  [Deploying to a VPS](#deploying-to-a-vps)).
 
 ## Quick start
 
@@ -742,6 +744,7 @@ src/
     sharing-actions.ts           Server Actions: invite link, roles, remove, join, leave
     api/drawings/[id]/changes    POST batches of changes (the collaboration write path)
     api/drawings/[id]/events     GET live updates (Server-Sent Events)
+    api/health                   GET 200 "ok" when the app can reach its database (for health checks)
     api/drawings/[id]/doc        GET the drawing and its version (to catch up)
     api/drawings/[id]/presence   POST cursor and selection (passed on, not stored)
     api/drawings/[id]/thumbnail  POST the gallery preview
@@ -835,6 +838,14 @@ scripts/migrate.mjs              applies the migrations in drizzle/ (npm run db:
 scripts/stripe-setup.mjs         creates the Stripe product and price (npm run stripe:setup)
 scripts/membership.mjs           complimentary memberships (npm run membership)
 scripts/role.mjs                 roles (npm run role)
+Dockerfile                       the app image: standalone server, migrations and admin scripts
+deploy/compose.yml               one-server production: app, Postgres, Redis, Caddy, backups
+deploy/Caddyfile                 HTTPS and security headers in front of the app
+deploy/setup-vps.sh              one-time server setup: Docker, firewall, swap, security updates
+deploy/deploy.sh                 first run and every update: settings check, backup, build, start
+deploy/app-start.sh              the app container's start: migrations, then the server
+deploy/backup/                   backup.sh, restore.sh and the every-24-hours loop
+deploy/.env.example              production settings (copied to deploy/.env)
 e2e/                             Puppeteer tests; mock AI, Stripe, Turnstile and mail servers; fixtures
 ```
 
@@ -1084,6 +1095,102 @@ membership is what's being tested). They need Chrome (`CHROME_PATH` if it isn't
 `/usr/bin/google-chrome`) and `psql`, and create accounts and drawings in the database from
 `DATABASE_URL`, so use a dev database.
 
+## Deploying to a VPS
+
+The cheapest way to run canvas for real is one small Linux server with everything on it, in Docker:
+
+```
+internet ──► Caddy :80 :443   HTTPS (Let's Encrypt, renewed by itself), http → https
+               └─► app :3000  Next.js (standalone build); applies new migrations, then serves
+                     ├─► Postgres   accounts, drawings, files          ◄── backup: pg_dump every 24 h
+                     └─► Redis      rate limits                             into deploy/backups
+```
+
+Only Caddy is reachable from outside. Live collaboration runs with `REALTIME_BUS=local` (one server:
+updates go from memory, nothing extra to pay for; see [Live traffic](#live-traffic-and-keeping-it-cheap)).
+The files are `Dockerfile`, `.dockerignore` and `deploy/`.
+
+**What you need:** a VPS with Ubuntu 24.04+ or Debian 12+, a domain, and the Stripe and email settings
+from [Memberships](#memberships) and [Quick start](#quick-start). The smallest plans are enough: running,
+the app takes about 350 MB of memory, Postgres about 120 MB and Redis under 10 MB; building it on the
+server peaks around 1.1 GB, which 2 GB plus the swap the setup adds covers (4 GB is comfortable).
+
+1. **Point the domain at the server**: an `A` record with its IPv4 address (and `AAAA` for IPv6). HTTPS
+   can only start once this resolves.
+2. **Set up the server** (Docker, a firewall allowing only SSH, HTTP and HTTPS, swap, automatic
+   security updates). Over SSH:
+
+   ```bash
+   git clone https://github.com/alex931d/canvas.git && cd canvas
+   sudo bash deploy/setup-vps.sh
+   ```
+
+   (No git yet? `sudo apt-get install -y git`.) Then log out and back in, to use Docker without sudo.
+   A private repository needs a
+   [deploy key](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys)
+   or `gh auth login` to clone.
+3. **Fill in the settings.** `bash deploy/deploy.sh` creates `deploy/.env` with a generated database
+   password; fill in `DOMAIN`, Stripe and `SMTP_URL`/`EMAIL_FROM` there (`nano deploy/.env`), plus
+   Turnstile and the math checker if you use them. It's only readable by you and never committed.
+4. **Start it:** `bash deploy/deploy.sh` again. It builds the image (a few minutes), starts everything,
+   waits until the app answers its health check (`/api/health`), and prints the address.
+5. **Finish Stripe:** add the webhook endpoint `https://<your domain>/api/stripe/webhook` (events in
+   [Going live](#memberships)) and put its signing secret in `STRIPE_WEBHOOK_SECRET`, then
+   `bash deploy/deploy.sh` once more.
+6. **Make yourself an admin** once you've signed up (from `deploy/`):
+   `docker compose exec app node scripts/role.mjs set you@example.com admin`. The membership script
+   works the same way (`node scripts/membership.mjs grant you@example.com`).
+
+**Updating:** `bash deploy/deploy.sh` pulls the latest code, backs up the database, rebuilds and
+restarts; new migrations are applied as the app starts. Pages left open from the previous version
+reload themselves on their next navigation, and edits in progress are kept in the browser and synced
+after. `--no-pull` deploys the code as it is on the server. A change to `deploy/.env` alone needs only
+`docker compose up -d` (from `deploy/`).
+
+**Everyday commands** (from `deploy/`): `docker compose ps` (what's running), `docker compose logs -f
+app` (the app's log; logs are capped at 30 MB per service), `docker compose restart app`.
+
+### Backups
+
+The `backup` service dumps the whole database (accounts, drawings and their files) into
+`deploy/backups` every 24 hours and keeps 14 days (`BACKUP_EVERY_HOURS`, `BACKUP_KEEP_DAYS`);
+`deploy.sh` also takes one before every update. They're on the same disk as the database, so copy them
+somewhere else too, for example from your own computer:
+
+```bash
+rsync -av you@your-server:canvas/deploy/backups/ ./canvas-backups/
+```
+
+Or turn on your host's server backups or snapshots. To take one now:
+`docker compose exec backup sh /backup/backup.sh`.
+
+To **restore** one (it replaces everything in the database, in one transaction: if the file is damaged,
+nothing changes):
+
+```bash
+cd deploy
+docker compose stop app
+docker compose exec backup sh /backup/restore.sh /backups/canvas-2026-11-24-031700.dump
+docker compose start app
+```
+
+**Moving from Supabase** (or any Postgres): dump just the app's data with the backup container's
+`pg_dump`, then restore it as above. Use the Session pooler connection string from Supabase's
+**Connect** button:
+
+```bash
+cd deploy
+docker compose run --rm backup pg_dump --format=custom --schema=public --schema=drizzle \
+  --file=/backups/from-supabase.dump "postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres"
+docker compose stop app
+docker compose exec backup sh /backup/restore.sh /backups/from-supabase.dump
+docker compose start app
+```
+
+**Not covered here:** more than one app server. For that, set `REALTIME_BUS=redis` (or `postgres`),
+put the database and Redis where every server can reach them, and see
+[Live traffic](#live-traffic-and-keeping-it-cheap).
+
 ## Notes for building on this
 
 - **Not built yet:** two-factor sign-in and changing the email address (the Lucia guide has recipes
@@ -1102,8 +1209,9 @@ membership is what's being tested). They need Chrome (`CHROME_PATH` if it isn't
   even after they're taken off the canvas (undo can bring them back).
 - **Uploads pass through `src/proxy.ts`**, and Next keeps only `experimental.proxyClientMaxBodySize`
   of a request body for it (52 MB in `next.config.ts`, for 50 MB videos). Raise both together.
-- **Live collaboration needs a long-running server** (`next start`, a container, a VM): the event
-  stream is a response that stays open, which serverless functions cut off. With one server, set
+- **Live collaboration needs a long-running server** (`next start`, a container, a VM; the
+  [VPS setup](#deploying-to-a-vps) is one): the event stream is a response that stays open, which
+  serverless functions cut off. With one server, set
   `REALTIME_BUS=local`; with several, each opens one extra connection for the bus (Redis, or Postgres
   for `LISTEN`; see [Live traffic](#live-traffic-and-keeping-it-cheap)). Behind a proxy, make sure it
   doesn't buffer `text/event-stream` responses (the app sends `X-Accel-Buffering: no` for nginx).

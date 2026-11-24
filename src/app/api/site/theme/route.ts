@@ -1,3 +1,4 @@
+import { connection } from "next/server";
 import { getSeasonalMode } from "@/lib/site/settings";
 
 /**
@@ -6,6 +7,7 @@ import { getSeasonalMode } from "@/lib/site/settings";
  * browsers for a minute, so a change in /admin reaches everyone within one.
  */
 export async function GET() {
+  await connection(); // read per request (and not tried while building, when there may be no database)
   let mode;
   try {
     mode = await getSeasonalMode();

@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // The Docker image (Dockerfile) builds with NEXT_OUTPUT=standalone: .next/standalone
+  // is then the server with only the files it needs. Other builds stay as they
+  // were, for `npm start`.
+  output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   cacheComponents: true,
   partialPrefetching: true,
   // The Redis client for rate limits (src/lib/redis.ts) runs as plain Node, unbundled.
