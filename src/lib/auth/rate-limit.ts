@@ -58,6 +58,14 @@ function makeLimiters() {
     codeEmailsByUser: bucket("codeEmailsByUser", 5, 600),
     /** Codes entered: 10, then one every 6 s, per account (each code also allows only 5 wrong tries). */
     codeChecksByUser: bucket("codeChecksByUser", 10, 6),
+    /**
+     * Two-factor codes entered (logging in, or changing two-factor settings):
+     * 10, then one every 30 s, per account. Guessing a 6-digit code at that
+     * rate takes months.
+     */
+    twoFactorByUser: bucket("twoFactorByUser", 10, 30),
+    /** Returns from Google sign-in: 20, then one every 3 s, per IP. */
+    googleByIp: bucket("googleByIp", 20, 3),
     /** "Forgot password" requests: 10, then one every 30 s, per IP. */
     resetRequestsByIp: bucket("resetRequestsByIp", 10, 30),
     /** Reset emails: 3, then one every 20 minutes, per address, so nobody's inbox gets flooded. */

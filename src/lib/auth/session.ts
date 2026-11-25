@@ -3,7 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { sha256 } from "@oslojs/crypto/sha2";
 import { constantTimeEqual } from "@oslojs/crypto/subtle";
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
@@ -31,6 +31,11 @@ import { can, type Permission, type Role } from "./roles";
  *    time.
  *  - Inactivity timeout: sessions unused for 30 days are deleted;
  *    last_verified_at is refreshed at most once an hour.
+ *  - Two-factor sign-in: when the password (or Google) checks out for an
+ *    account with two-factor on, the session starts out pending. A pending
+ *    session counts as signed out everywhere except the code page
+ *    (getPendingTwoFactor), lasts 10 minutes, and is replaced by a new,
+ *    full session once the code is right (completeTwoFactor).
  */
 
 export type SessionUser = {
@@ -49,7 +54,10 @@ type ValidationResult =
 
 const ALPHABET = "abcdefghijkmnpqrstuvwxyz23456789"; // no l, o, 0, 1
 
-function generateSecureRandomString(): string {
+/** How long a password-checked session waits for its two-factor code. */
+export const TWO_FACTOR_PENDING_SECONDS = 10 * 60;
+
+export function generateSecureRandomString(): string {
   const bytes = new Uint8Array(24);
   crypto.getRandomValues(bytes);
   let out = "";
@@ -61,17 +69,24 @@ function hashSecret(secret: string): Uint8Array {
   return sha256(new TextEncoder().encode(secret));
 }
 
-/** Create a session for a user and return the token to put in the cookie. */
-export async function createSession(userId: string): Promise<string> {
+/**
+ * Create a session for a user and return the token to put in the cookie.
+ * With `twoFactorPending`, it only opens the two-factor code page until the
+ * code is entered.
+ */
+export async function createSession(userId: string, { twoFactorPending = false } = {}): Promise<string> {
   const id = generateSecureRandomString();
   const secret = generateSecureRandomString();
-  await db.insert(sessions).values({ id, secretHash: Buffer.from(hashSecret(secret)), userId });
+  await db.insert(sessions).values({ id, secretHash: Buffer.from(hashSecret(secret)), userId, twoFactorPending });
   return `${id}.${secret}`;
 }
 
-export async function validateSessionToken(token: string): Promise<ValidationResult> {
+type SessionRow = { session: CurrentSession; user: SessionUser; twoFactorPending: boolean };
+
+/** The session a token belongs to, pending or not. Deletes it if it has expired. */
+async function readSession(token: string): Promise<SessionRow | null> {
   const parts = token.split(".");
-  if (parts.length !== 2 || !parts[0] || !parts[1]) return { session: null, user: null };
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
   const [id, secret] = parts;
 
   const [row] = await db
@@ -86,25 +101,27 @@ export async function validateSessionToken(token: string): Promise<ValidationRes
       emailVerified: users.emailVerified,
       role: users.role,
       avatarUpdatedAt: users.avatarUpdatedAt,
+      twoFactorPending: sessions.twoFactorPending,
     })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
     .where(eq(sessions.id, id))
     .limit(1);
-  if (!row) return { session: null, user: null };
+  if (!row) return null;
 
   const now = Date.now();
-  if (now - row.lastVerifiedAt.getTime() >= INACTIVITY_TIMEOUT_SECONDS * 1000) {
+  const expired = row.twoFactorPending
+    ? now - row.createdAt.getTime() >= TWO_FACTOR_PENDING_SECONDS * 1000
+    : now - row.lastVerifiedAt.getTime() >= INACTIVITY_TIMEOUT_SECONDS * 1000;
+  if (expired) {
     await db.delete(sessions).where(eq(sessions.id, id));
-    return { session: null, user: null };
+    return null;
   }
 
-  if (!constantTimeEqual(hashSecret(secret), new Uint8Array(row.secretHash))) {
-    return { session: null, user: null };
-  }
+  if (!constantTimeEqual(hashSecret(secret), new Uint8Array(row.secretHash))) return null;
 
   let lastVerifiedAt = row.lastVerifiedAt;
-  if (now - lastVerifiedAt.getTime() >= ACTIVITY_CHECK_INTERVAL_SECONDS * 1000) {
+  if (!row.twoFactorPending && now - lastVerifiedAt.getTime() >= ACTIVITY_CHECK_INTERVAL_SECONDS * 1000) {
     lastVerifiedAt = new Date(now);
     await db.update(sessions).set({ lastVerifiedAt }).where(eq(sessions.id, id));
   }
@@ -119,7 +136,15 @@ export async function validateSessionToken(token: string): Promise<ValidationRes
       role: row.role,
       avatarUrl: avatarUrl(row.userId, row.avatarUpdatedAt),
     },
+    twoFactorPending: row.twoFactorPending,
   };
+}
+
+/** The signed-in session and user for a token. Sessions still waiting for a two-factor code don't count. */
+export async function validateSessionToken(token: string): Promise<ValidationResult> {
+  const row = await readSession(token);
+  if (!row || row.twoFactorPending) return { session: null, user: null };
+  return { session: row.session, user: row.user };
 }
 
 export async function invalidateSession(sessionId: string) {
@@ -158,12 +183,33 @@ export async function deleteSessionCookie() {
 
 // ------------------------------------------------- data access layer
 
-/** The signed-in user for this request (validated once per request). */
-export const getCurrentSession = cache(async (): Promise<ValidationResult> => {
+/** This request's session, pending or not (read once per request). */
+const getSessionRow = cache(async (): Promise<SessionRow | null> => {
   const token = (await cookies()).get(SESSION_COOKIE)?.value ?? null;
-  if (!token) return { session: null, user: null };
-  return validateSessionToken(token);
+  return token ? readSession(token) : null;
 });
+
+/** The signed-in user for this request. Sessions waiting for a two-factor code don't count. */
+export const getCurrentSession = cache(async (): Promise<ValidationResult> => {
+  const row = await getSessionRow();
+  if (!row || row.twoFactorPending) return { session: null, user: null };
+  return { session: row.session, user: row.user };
+});
+
+/** For the two-factor code page: the session and account waiting for a code, if this request has one. */
+export async function getPendingTwoFactor(): Promise<{ session: CurrentSession; user: SessionUser } | null> {
+  const row = await getSessionRow();
+  return row?.twoFactorPending ? { session: row.session, user: row.user } : null;
+}
+
+/**
+ * The code was right: replace the pending session with a full one (a new
+ * token, so the one that waited for the code can't be used again).
+ */
+export async function completeTwoFactor(pendingSessionId: string, userId: string) {
+  await invalidateSession(pendingSessionId);
+  await setSessionCookie(await createSession(userId));
+}
 
 type RecentSession = { sessionId: string; user: SessionUser; at: number };
 const gs = globalThis as unknown as { canvasRecentSessions?: Map<string, RecentSession> };
@@ -213,6 +259,12 @@ export async function requirePermission(permission: Permission): Promise<Session
 /** Like requireUser, but lets in accounts whose email isn't confirmed yet (for /verify-email itself). */
 export async function requireSignedIn(): Promise<SessionUser> {
   const { user } = await getCurrentSession();
-  if (!user) redirect("/login");
+  if (!user) redirect((await getPendingTwoFactor()) ? "/login/two-factor" : "/login");
   return user;
+}
+
+/** Sign out everywhere except this session (e.g. after turning on two-factor sign-in). */
+export async function invalidateOtherSessions(userId: string, keepSessionId: string) {
+  await db.delete(sessions).where(and(eq(sessions.userId, userId), ne(sessions.id, keepSessionId)));
+  for (const [key, hit] of recentSessions) if (hit.user.id === userId && hit.sessionId !== keepSessionId) recentSessions.delete(key);
 }

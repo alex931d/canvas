@@ -3,13 +3,14 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { SignupForm } from "@/components/auth/auth-form";
 import { captchaSite } from "@/lib/auth/captcha";
+import { googleEnabled } from "@/lib/auth/google";
 
 export const metadata: Metadata = { title: "Sign up" };
 
-/** Read per request, so CAPTCHA keys can change without a rebuild. */
+/** Read per request, so CAPTCHA and Google keys can change without a rebuild. */
 async function SignupWithCaptcha() {
   await connection();
-  return <SignupForm captcha={captchaSite()} />;
+  return <SignupForm captcha={captchaSite()} google={googleEnabled()} />;
 }
 
 export default function SignupPage() {

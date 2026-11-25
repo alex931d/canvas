@@ -25,8 +25,8 @@ export function secureCookies() {
 
 /** Pages anyone can open without a session cookie… */
 export const PUBLIC_PATHS = ["/login", "/signup", "/welcome", "/pricing", "/terms", "/forgot-password"];
-/** …and everything under these (password reset links). */
-export const PUBLIC_PREFIXES = ["/reset-password/"];
+/** …and everything under these (password reset links, Google sign-in and its return). */
+export const PUBLIC_PREFIXES = ["/reset-password/", "/login/google"];
 
 export function isPublicPath(path: string) {
   return PUBLIC_PATHS.includes(path) || PUBLIC_PREFIXES.some((prefix) => path.startsWith(prefix));

@@ -9,3 +9,8 @@ export function verifyEmailPath(next: string): string {
   if (next.startsWith("/verify-email")) return next; // they followed the link in the email
   return next === "/" ? "/verify-email" : `/verify-email?next=${encodeURIComponent(next)}`;
 }
+
+/** The two-factor code page, keeping where they were headed. */
+export function twoFactorPath(next: string): string {
+  return next === "/" ? "/login/two-factor" : `/login/two-factor?next=${encodeURIComponent(next)}`;
+}
