@@ -2,7 +2,7 @@
 // parser, molar masses and the balancer, the graph expression parser, the
 // collaboration document model (two simulated tabs and a fake server),
 // to-do board layout and card moves, byte ranges for video, the schemas,
-// and the seasonal themes' dates.
+// the seasonal themes' dates, and tracing pictures into strokes.
 //   npm run test:unit
 import { balanceEquation } from "../src/lib/chem/balance";
 import { ELEMENTS } from "../src/lib/chem/elements";
@@ -32,6 +32,7 @@ import { ElementEffects, inkLength, MAX_ANIMATED, staggerStep, traceDuration } f
 import { KanbanEffects } from "../src/lib/canvas/kanban-fx";
 import { DEFAULT_PREFERENCES, parsePreferences } from "../src/lib/preferences";
 import { avatarUrl, sniffImageType } from "../src/lib/profile/avatar";
+import { findInk, simplify, traceStrokes, type Pixels } from "../src/lib/canvas/trace";
 
 let fails = 0;
 const eq = (label: string, got: unknown, want: unknown) => {
@@ -404,6 +405,98 @@ eq("a new card pops in", [kfx.card("kb", "c3")?.alpha, kfx.card("kb", "c3")?.sca
 kfx.setEnabled(false);
 kfx.change(withTwo, finished);
 eq("board effects off: no animations", kfx.busy, false);
+
+
+// ------------------------------------------------------------ tracing pictures into strokes
+{
+  /** A white picture with ink painted by `paint(x, y)` (true = ink), optionally light-on-dark and grainy. */
+  const picture = (w: number, h: number, paint: (x: number, y: number) => boolean, { dark = false, noise = 0, seed = 7 } = {}): Pixels => {
+    const data = new Uint8ClampedArray(w * h * 4);
+    let r = seed;
+    const rand = () => (r = (r * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let v = paint(x, y) ? (dark ? 235 : 30) : dark ? 40 : 245;
+        v += (rand() - 0.5) * noise;
+        data.set([v, v, v, 255], (y * w + x) * 4);
+      }
+    }
+    return { width: w, height: h, data };
+  };
+  const nearSegment = (x: number, y: number, ax: number, ay: number, bx: number, by: number, r: number) => {
+    const dx = bx - ax, dy = by - ay;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)));
+    return Math.hypot(x - ax - t * dx, y - ay - t * dy) <= r;
+  };
+  const span = (pts: number[], axis: 0 | 1) => {
+    const v = pts.filter((_, k) => k % 2 === axis);
+    return Math.max(...v) - Math.min(...v);
+  };
+  const barPic = () => picture(200, 60, (x, y) => x >= 20 && x < 180 && y >= 26 && y < 34);
+
+  const bar = traceStrokes(barPic());
+  eq("a bar becomes one straight stroke along its middle", [bar.strokes.length, bar.strokes[0]?.points.length], [1, 4]);
+  eq(
+    "…as long as the bar, as wide as its ink",
+    [span(bar.strokes[0].points, 0) >= 150, Math.abs(bar.strokes[0].points[1] - 30) <= 1, bar.thickness >= 6 && bar.thickness <= 9],
+    [true, true, true],
+  );
+
+  const ring = traceStrokes(picture(120, 120, (x, y) => Math.abs(Math.hypot(x - 60, y - 60) - 40) <= 3));
+  const loop = ring.strokes[0]?.points ?? [];
+  eq(
+    "a ring becomes one closed loop",
+    [ring.strokes.length, Math.hypot(loop[0] - loop[loop.length - 2], loop[1] - loop[loop.length - 1]) < 2, Math.round(span(loop, 0) / 10)],
+    [1, true, 8],
+  );
+
+  const plus = traceStrokes(picture(100, 100, (x, y) => nearSegment(x, y, 20, 50, 80, 50, 3) || nearSegment(x, y, 50, 20, 50, 80, 3)));
+  eq(
+    "a plus sign: four arms from its middle, no stubs",
+    [plus.strokes.filter((s) => s.points.length >= 4).length, plus.strokes.every((s) => span(s.points, 0) + span(s.points, 1) >= 20)],
+    [4, true],
+  );
+
+  const dots = traceStrokes(picture(160, 60, (x, y) => (x >= 20 && x < 140 && y >= 18 && y < 24) || Math.hypot(x - 80, y - 42) <= 5));
+  const dot = dots.strokes.find((s) => span(s.points, 0) + span(s.points, 1) < 4);
+  eq("a dot under a line stays a dot, as big as it is", [dots.strokes.length, !!dot, (dot?.size ?? 0) >= 7], [2, true, true]);
+
+  const grainy = traceStrokes(
+    picture(200, 80, (x, y) => (x >= 20 && x < 180 && y >= 36 && y < 44) || (x * 7 + y * 13) % 97 === 0, { noise: 30 }),
+  );
+  eq("specks and grain don't become strokes", grainy.strokes.length, 1);
+
+  const board = traceStrokes(picture(200, 60, (x, y) => x >= 20 && x < 180 && y >= 26 && y < 34, { dark: true, noise: 20 }));
+  eq("light writing on a dark background is read the right way round", [board.darkBackground, board.strokes.length], [true, 1]);
+  eq(
+    "…unless told otherwise",
+    traceStrokes(picture(200, 60, (x, y) => x >= 20 && x < 180 && y >= 26 && y < 34, { dark: true }), { darkBackground: false }).darkBackground,
+    false,
+  );
+
+  // Shade across a photo: the paper goes from bright to dim; only the line is ink.
+  const shaded = barPic();
+  for (let i = 0; i < shaded.data.length; i += 4) {
+    const f = 1 - (((i / 4) % 200) / 200) * 0.55;
+    for (let c = 0; c < 3; c++) shaded.data[i + c] *= f;
+  }
+  eq("shade across a photo doesn't turn into ink", traceStrokes(shaded).strokes.length, 1);
+
+  eq("an empty picture gives no strokes", traceStrokes(picture(80, 40, () => false)).strokes.length, 0);
+  eq("findInk boxes the writing", findInk(picture(200, 100, (x, y) => x >= 50 && x < 150 && y >= 40 && y < 60)), { x: 50, y: 40, w: 100, h: 20 });
+  eq(
+    "…leaving out a page edge cut off at the border",
+    findInk(picture(200, 100, (x, y) => (x >= 50 && x < 150 && y >= 40 && y < 60) || x < 4)),
+    { x: 50, y: 40, w: 100, h: 20 },
+  );
+  eq("simplify keeps corners and drops the points in between", simplify([0, 0, 1, 0.1, 2, 0, 3, 0, 3, 1, 3, 2], 0.5), [0, 0, 3, 0, 3, 2]);
+  eq(
+    "traced strokes fit the stroke schema",
+    elementSchema.safeParse({ id: "t", type: "stroke", color: "#201f24", size: bar.strokes[0].size, brush: "marker", points: bar.strokes[0].points })
+      .success,
+    true,
+  );
+}
 
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

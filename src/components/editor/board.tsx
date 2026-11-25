@@ -71,7 +71,7 @@ import { GRAPH_COLORS, GraphEditor } from "./graph-editor";
 import { KanbanEditor, type KanbanEdit, type KanbanEditorHandle } from "./kanban-editor";
 import { MathCard, type MathState } from "./math-card";
 import { MediaControls } from "./media-controls";
-import { MEDIA_ACCEPT, TOOLS, VIEW_TOOLS, type Style, type Tool } from "./tools";
+import { MEDIA_ACCEPT, TOOLS, TRACE_ACTION, VIEW_TOOLS, type Style, type Tool } from "./tools";
 import { ZoomControls } from "./zoom-controls";
 
 // ------------------------------------------------------------------ types
@@ -88,9 +88,22 @@ export type FlashcardCapture = {
   text: string;
 };
 
+/** Strokes traced from part of a picture (src/lib/canvas/trace.ts), in the traced pixels. */
+export type TracedPicture = {
+  strokes: { points: number[]; size: number }[];
+  /** The traced pixels' size. */
+  width: number;
+  height: number;
+  /** How big that part of the picture is, in the picture's own pixels (sets the size on the board). */
+  naturalWidth: number;
+  naturalHeight: number;
+};
+
 export type BoardHandle = {
   /** Put images, GIFs and videos on the board. */
   insertFiles: (files: File[]) => void;
+  /** Put traced strokes in the middle of the view, in the pen colour, selected. Returns how many. */
+  insertTraced: (picture: TracedPicture) => number;
   startMathCheck: () => void;
   /** Typeset and place an equation in the middle of the view. */
   insertMath: (value: Pick<MathElement, "syntax" | "source">) => Promise<void>;
@@ -179,6 +192,7 @@ export function Board({
   onPointerWorld,
   onSelectionChange,
   onMakeFlashcard,
+  onTracePicture,
   ref,
 }: {
   drawingId: string;
@@ -205,6 +219,8 @@ export function Board({
   onSelectionChange?: (ids: string[]) => void;
   /** Capture the selection as a picture and start a flashcard from it. */
   onMakeFlashcard?: (capture: FlashcardCapture) => void;
+  /** Open "Trace a picture" (the U key). */
+  onTracePicture?: () => void;
   ref?: Ref<BoardHandle>;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -1157,8 +1173,44 @@ export function Board({
     [dispatch, setTool],
   );
 
+  /**
+   * Traced strokes go where a picture would: in the middle of the view, at
+   * the picture's on-screen size (a phone photo is shrunk to 60 % of the
+   * view; a screenshot keeps its size), as one change that one undo removes.
+   */
+  const insertTraced = (picture: TracedPicture): number => {
+    const canvas = canvasRef.current;
+    if (!canvas || picture.strokes.length === 0) return 0;
+    const dpr = window.devicePixelRatio || 1;
+    const c = camRef.current;
+    const viewW = canvas.width / dpr / c.z;
+    const viewH = canvas.height / dpr / c.z;
+    const w0 = picture.naturalWidth / dpr;
+    const h0 = picture.naturalHeight / dpr;
+    const fit = Math.min(1, (viewW * 0.6) / w0, (viewH * 0.6) / h0);
+    const k = (w0 * fit) / picture.width; // world units per traced pixel
+    const x0 = c.x + viewW / 2 - (picture.width * k) / 2;
+    const y0 = c.y + viewH / 2 - (picture.height * k) / 2;
+    const s = propsRef.current.style;
+    const color = s.color === "#ffffff" ? "#201f24" : s.color;
+    const added: CanvasElement[] = picture.strokes.map((st) => ({
+      id: newId(),
+      type: "stroke",
+      color,
+      brush: "marker",
+      size: clamp(round1(st.size * k), 0.5, 400),
+      points: st.points.slice(0, MAX_STROKE_COORDS).map((v, i) => round1(i % 2 === 0 ? x0 + v * k : y0 + v * k)),
+    }));
+    dispatch({ type: "add", elements: added });
+    setSelected(added.map((a) => a.id));
+    setLassoRegion(null);
+    setTool("select");
+    return added.length;
+  };
+
   useImperativeHandle(ref, () => ({
     insertFiles: (files) => void insertFiles(files),
+    insertTraced,
     insertMath,
     startMathCheck: () => {
       if (selected.length > 0 || (lassoRegion && lassoRegion.length > 2)) checkSelection();
@@ -1883,6 +1935,10 @@ export function Board({
     if (e.altKey || e.shiftKey) return;
     if (key === "i") {
       if (!readOnly) fileInputRef.current?.click();
+      return;
+    }
+    if (key === TRACE_ACTION.key) {
+      if (!readOnly) onTracePicture?.();
       return;
     }
     const t = TOOLS.find((x) => x.key === key);

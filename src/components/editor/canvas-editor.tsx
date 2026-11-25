@@ -41,7 +41,8 @@ import { PeerAvatars } from "./peer-avatars";
 import { ShareDialog } from "./share-dialog";
 import { StoragePopover, type ServerState } from "./storage-panel";
 import { StyleBar } from "./style-bar";
-import { DEFAULT_STYLE, IMAGE_ACTION, MEDIA_ACCEPT, TOOLS, VIEW_TOOLS, type Style, type Tool } from "./tools";
+import { DEFAULT_STYLE, IMAGE_ACTION, MEDIA_ACCEPT, TOOLS, TRACE_ACTION, VIEW_TOOLS, type Style, type Tool } from "./tools";
+import { TracePictureDialog } from "./trace-picture-dialog";
 
 function fileSafe(name: string) {
   return (
@@ -159,6 +160,9 @@ export function CanvasEditor({
 
   const boardRef = useRef<BoardHandle>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const traceInputRef = useRef<HTMLInputElement>(null);
+  const [traceFile, setTraceFile] = useState<File | null>(null);
+  const closeTrace = useCallback(() => setTraceFile(null), []);
   const backupInputRef = useRef<HTMLInputElement>(null);
 
   const localMode = localStatus?.mode ?? "indexeddb";
@@ -557,6 +561,14 @@ export function CanvasEditor({
               shortcut={IMAGE_ACTION.key}
               onClick={() => imageInputRef.current?.click()}
             />
+            <SidebarButton
+              compact
+              icon={<TRACE_ACTION.Icon />}
+              label={TRACE_ACTION.label}
+              shortcut={TRACE_ACTION.key}
+              disabled={!ready}
+              onClick={() => traceInputRef.current?.click()}
+            />
             <SidebarSeparator />
             <SidebarButton
               compact
@@ -754,6 +766,7 @@ export function CanvasEditor({
             onPointerWorld={onPointerWorld}
             onSelectionChange={onSelectionChange}
             onMakeFlashcard={setFlashcard}
+            onTracePicture={() => traceInputRef.current?.click()}
           />
           {readOnly ? null : <StyleBar tool={tool} style={style} onChange={updateStyle} />}
         </div>
@@ -771,6 +784,14 @@ export function CanvasEditor({
             toast.error("Couldn't load the equation tools. Check your connection and try again.");
           }
         }}
+      />
+
+      <TracePictureDialog
+        file={traceFile}
+        color={style.color}
+        onClose={closeTrace}
+        onAdd={(picture) => boardRef.current?.insertTraced(picture) ?? 0}
+        onPickAnother={() => traceInputRef.current?.click()}
       />
 
       <FlashcardDialog capture={flashcard} drawingId={id} deck={savedTitle} onClose={() => setFlashcard(null)} />
@@ -793,6 +814,18 @@ export function CanvasEditor({
           const files = [...(e.target.files ?? [])];
           e.target.value = "";
           boardRef.current?.insertFiles(files);
+        }}
+      />
+      <input
+        ref={traceInputRef}
+        type="file"
+        accept="image/*"
+        hidden
+        data-testid="trace-input"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) setTraceFile(file);
         }}
       />
       <input

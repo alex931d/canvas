@@ -9,6 +9,7 @@ import {
   Minus,
   MousePointer2,
   Pen,
+  ScanLine,
   Sigma,
   Square,
   SquareKanban,
@@ -52,6 +53,9 @@ export const TOOLS: { id: Tool; label: string; key: string; Icon: LucideIcon }[]
 export const VIEW_TOOLS: Tool[] = ["select", "lasso", "hand"];
 
 export const IMAGE_ACTION = { label: "Image or video", key: "i", Icon: ImagePlus };
+
+/** A photo or screenshot of an equation, traced into pen strokes (trace-picture-dialog.tsx). */
+export const TRACE_ACTION = { label: "Trace a picture", key: "u", Icon: ScanLine };
 
 /** What the file pickers offer: pictures, GIFs and the video formats browsers play. */
 export const MEDIA_ACCEPT = "image/*,video/mp4,video/webm,video/quicktime,.mp4,.m4v,.webm,.mov";

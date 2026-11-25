@@ -143,7 +143,7 @@ Without a key, everything else works and **Check math** explains how to set it u
 | `npm run role -- set <email> <role>\|show <email>\|list` | Roles: make the first admin (see [Roles](#roles-and-the-admin-dashboard)) |
 | `npm run typecheck` | Generate route types and run `tsc` |
 | `npm run test:e2e` | Browser tests (see below) |
-| `npm run test:unit` | Quick checks of the chemistry, graph, collaboration and calendar logic, no browser needed, then the rate limits against a throwaway `redis-server` |
+| `npm run test:unit` | Quick checks of the chemistry, graph, collaboration, calendar and picture-tracing logic, no browser needed, then the rate limits against a throwaway `redis-server` |
 
 ## Accounts and sessions
 
@@ -553,6 +553,35 @@ Decorations for Easter, Halloween and Christmas on the landing and pricing pages
   elements given as intervals); elements with no stable isotopes show the mass number of their
   longest-lived isotope. Any result can go onto the canvas as a typeset equation.
 
+### Tracing a picture
+
+**Trace a picture (U)** turns a photo or screenshot of an equation (math, chemistry, anything written
+or printed) into pen strokes. Choose the picture, drag a box around the part you want (it starts
+around the writing it finds), and the preview shows the strokes it becomes, in your pen colour.
+**Add to canvas** puts them in the middle of the view, selected; they're ordinary strokes, so they can
+be moved, recoloured, erased, checked with **Check math** or turned into a flashcard, and one undo
+takes them all off. The box moves with the arrow keys and resizes with Shift and the arrow keys.
+
+It all happens in the browser (`src/lib/canvas/trace.ts`, `trace-picture-dialog.tsx`); the picture
+isn't uploaded or kept.
+
+1. The box is copied at about 1,000 pixels across (small screenshots are enlarged up to 4×, so thin
+   lines have room).
+2. **Ink or paper**, per pixel: darker than the average of the pixels around it (Bradley's adaptive
+   threshold, so shade and uneven light in photos don't become ink) and clearly darker than the paper.
+   A blackboard or dark screenshot is recognised and flipped (the **Light writing on a dark
+   background** switch overrides it). **Detail** trades fainter lines against specks.
+3. Specks smaller than a fraction of a pen dot are dropped; pinholes in the ink are filled.
+4. The ink is thinned to lines one pixel wide (Zhang–Suen), walked into strokes (loose ends, then
+   branches out of crossings, then closed loops), ragged-edge spurs are dropped, and each stroke is
+   simplified (Ramer–Douglas–Peucker).
+5. Each stroke's pen width comes from the ink under it (twice the distance from its middle to its
+   edge), so dots (decimal points, multiplication dots, charges) stay dots and bold bars stay bold.
+
+A box with more than 2,000 strokes is refused (that's a page, not an equation): make it smaller or
+lower Detail. Pictures are sized like inserted images: a screenshot keeps its on-screen size, a phone
+photo is shrunk to fit 60 % of the view.
+
 ## Live collaboration
 
 Open **Share** in a drawing and turn on **Invite with a link**. Anyone with a membership who opens the
@@ -781,6 +810,7 @@ settings sections.
 | L / A | Line / arrow | Arrows (+Shift) | Nudge |
 | R / O | Rectangle / ellipse | Ctrl/⌘ + / − / 0 | Zoom in / out / 100 % |
 | M | Equation | G | Graph |
+| U | Trace a picture into strokes | | |
 | K | To-do board | Shift + corner drag | Stretch; widen a to-do board |
 | Shift while drawing | Square, circle, 45° lines | Shift 1 / Shift 2 | Zoom to fit / selection |
 
@@ -850,6 +880,7 @@ src/
     editor/chem-panel.tsx        molar mass, balancer, periodic table
     editor/share-dialog.tsx      invite link, roles, people
     editor/flashcard-dialog.tsx  make a card from the selection
+    editor/trace-picture-dialog.tsx  Trace a picture: the box, the preview, Detail, Add to canvas
     gallery/                     overview cards, drawing grids, delete / leave
     study/                       review session, card list
     kit/                         the component kit: buttons, fields, menus, dialogs, toasts…
@@ -867,6 +898,7 @@ src/
     auth/two-factor.ts           authenticator app codes and recovery codes: set up, check, turn off
     auth/secret-box.ts           AES-256-GCM with ENCRYPTION_KEY, for the two-factor keys
     auth/google.ts               Google OAuth (arctic), linking Google accounts
+    canvas/trace.ts              tracing a picture into strokes: threshold, clean, thin, walk, simplify
     auth/captcha.ts              Turnstile siteverify (server); captcha-shared.ts for the forms
     auth/rate-limit.ts           the rate limits: token buckets and the per-account login throttle
     rate-limit/buckets.ts        how they work, in Redis (Lua) or in memory
@@ -1128,6 +1160,12 @@ Google, it checks the client secret, the redirect URI and the PKCE verifier. `GO
   edits restored in a new tab.
 - `e2e/test-quota.mjs` (17 checks): squeezes the site's quota through the Chrome DevTools Protocol and
   walks the whole fallback chain, including pasting an image when nothing fits locally.
+- `e2e/test-trace.mjs` (28 checks): Trace a picture with a shaded, grainy photo of a fraction and a
+  square root and with a blackboard of chalk chemistry: the U key and button, the box starting around
+  the writing, resizing it by an edge, moving and resizing it with the keyboard, drawing a new one,
+  Whole picture, the count and preview following it in the pen colour, the dark-background switch
+  (detected, and overridden), Detail, Add to canvas (every stroke, selected, saved as marker strokes in
+  the pen colour, the writing's shape), one undo, Cancel, a file that isn't a picture, and a phone.
 - `e2e/test-input.mjs` (6 checks): real pen pressure, two-finger pinch zoom, and opening a version 1
   drawing.
 - `e2e/test-collab.mjs` (40 checks): three people in three browsers. Invite links (members
@@ -1183,8 +1221,9 @@ parser, the collaboration model (two simulated tabs against a fake server), to-d
 moves, Range header parsing, the seasonal
 themes' dates (Easter Sundays from 2024 to 2285, and each theme's first and last day), the admin
 dashboard's address handling and five-page window, the settings' parsing, profile picture URLs and type
-sniffing, and the drawing and to-do board effects (what replays, what waits, ghosts, glides from a
-drop, a moved board's cards not lagging), without a browser.
+sniffing, the drawing and to-do board effects (what replays, what waits, ghosts, glides from a
+drop, a moved board's cards not lagging), and picture tracing (a bar, a ring, a plus sign, a dot under
+a line, grain, shade across a photo, a blackboard, finding the writing), without a browser.
 
 Each suite signs up its own account first (with a complimentary membership, except where the
 membership is what's being tested). They need Chrome (`CHROME_PATH` if it isn't
