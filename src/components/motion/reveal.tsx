@@ -40,6 +40,8 @@ export function Reveal({
   delay?: number;
   className?: string;
   children: ReactNode;
+  /** For links to this part of the page (#id). */
+  id?: string;
   "aria-label"?: string;
   "aria-labelledby"?: string;
 }) {

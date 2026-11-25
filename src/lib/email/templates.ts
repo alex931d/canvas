@@ -114,3 +114,87 @@ export function passwordChangedEmail({ name, email, resetLink }: { name: string;
   );
   return { subject: "Your canvas password was changed", text, html };
 }
+
+/**
+ * A security change to the account: what happened, then "if you didn't, reset
+ * your password". Two-factor and Google sign-in changes use this.
+ */
+function securityNotice({
+  subject,
+  name,
+  lines,
+  resetLink,
+}: {
+  subject: string;
+  name: string;
+  /** Plain sentences (escaped for the HTML part). */
+  lines: string[];
+  resetLink: string | null;
+}): Message {
+  const ifNotYou = resetLink
+    ? `If it wasn't you, reset your password now: ${resetLink}`
+    : "If it wasn't you, reset your password now from the canvas login page.";
+  const text = [`Hi ${name},`, "", ...lines.flatMap((l) => [l, ""]), ifNotYou].join("\n");
+  const html = page(
+    subject,
+    p(`Hi ${esc(name)},`) +
+      lines.map((l) => p(esc(l))).join("") +
+      (resetLink
+        ? p("If it wasn't you, reset your password now:") + button(resetLink, "Reset my password")
+        : p("If it wasn't you, reset your password now from the canvas login page.")),
+  );
+  return { subject, text, html };
+}
+
+type Notice = { name: string; email: string; resetLink: string | null };
+
+export function twoFactorOnEmail({ name, email, resetLink }: Notice): Message {
+  return securityNotice({
+    subject: "Two-factor sign-in is on for your canvas account",
+    name,
+    lines: [
+      `Two-factor sign-in was just turned on for your canvas account (${email}). Logging in now also needs a code from your authenticator app, or one of your recovery codes.`,
+      "Every other device that was signed in has been signed out.",
+    ],
+    resetLink,
+  });
+}
+
+export function twoFactorOffEmail({ name, email, resetLink, byStaff }: Notice & { byStaff: boolean }): Message {
+  return securityNotice({
+    subject: "Two-factor sign-in is off for your canvas account",
+    name,
+    lines: [
+      byStaff
+        ? `Two-factor sign-in was turned off for your canvas account (${email}) by the canvas team, as you asked. Logging in now only needs your password. You can turn it on again in Settings.`
+        : `Two-factor sign-in was just turned off for your canvas account (${email}). Logging in now only needs your password.`,
+    ],
+    resetLink,
+  });
+}
+
+export function recoveryCodeUsedEmail({ name, email, resetLink, left }: Notice & { left: number }): Message {
+  return securityNotice({
+    subject: "A recovery code was used to log in to canvas",
+    name,
+    lines: [
+      `Someone just logged in to your canvas account (${email}) with one of your two-factor recovery codes. Each code works once; you have ${left} left.`,
+      left <= 3
+        ? "You're running low: make new ones in Settings, under Signing in."
+        : "You can make a new set any time in Settings, under Signing in.",
+    ],
+    resetLink,
+  });
+}
+
+export function googleLinkedEmail({ name, email, resetLink, googleEmail }: Notice & { googleEmail: string }): Message {
+  return securityNotice({
+    subject: "Google sign-in was added to your canvas account",
+    name,
+    lines: [
+      `Your canvas account (${email}) can now be logged in to with the Google account ${googleEmail}.`,
+      "You can disconnect it in Settings, under Signing in.",
+    ],
+    resetLink,
+  });
+}

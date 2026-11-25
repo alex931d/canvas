@@ -41,8 +41,12 @@ export const users = pgTable(
     name: text("name").notNull(),
     /** Stored lowercased and trimmed. */
     email: text("email").notNull(),
-    /** Argon2id PHC string ($argon2id$v=19$m=19456,t=2,p=1$...). */
-    passwordHash: text("password_hash").notNull(),
+    /**
+     * Argon2id PHC string ($argon2id$v=19$m=19456,t=2,p=1$...), or null for
+     * accounts that only sign in with Google (they can add one with
+     * "Forgot password?").
+     */
+    passwordHash: text("password_hash"),
     /**
      * True once they've entered the code we emailed them, or reset their
      * password through an emailed link. Until then they can only reach
@@ -116,8 +120,69 @@ export const sessions = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     /** Bumped at most hourly; sessions idle for 30 days expire. */
     lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Password (or Google) checked, but the account has two-factor sign-in
+     * and the code hasn't been entered yet. Such a session only opens the
+     * code page (/login/two-factor) and lasts 10 minutes
+     * (src/lib/auth/session.ts).
+     */
+    twoFactorPending: boolean("two_factor_pending").notNull().default(false),
   },
   (t) => [index("sessions_user_id_idx").on(t.userId)],
+).enableRLS();
+
+/**
+ * Two-factor sign-in with an authenticator app (src/lib/auth/two-factor.ts).
+ * A row with no enabled_at is a setup in progress: the code from it hasn't
+ * been entered yet, so it isn't asked for at login.
+ */
+export const userTwoFactor = pgTable("user_two_factor", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** The app's secret key, encrypted with ENCRYPTION_KEY (AES-256-GCM: iv, tag, ciphertext). */
+  totpKey: bytea("totp_key").notNull(),
+  enabledAt: timestamp("enabled_at", { withTimezone: true }),
+  /** The last 30-second step a code was accepted for, so a code works only once. */
+  lastUsedStep: bigint("last_used_step", { mode: "number" }).notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}).enableRLS();
+
+/** One-time codes for when the authenticator app isn't at hand. Only hashes are kept. */
+export const twoFactorRecoveryCodes = pgTable(
+  "two_factor_recovery_codes",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** SHA-256 of the code (codes are random, so a fast hash is enough). */
+    codeHash: bytea("code_hash").notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.codeHash] })],
+).enableRLS();
+
+/**
+ * Accounts at other sign-in providers linked to a canvas account. Today only
+ * Google (src/lib/auth/google.ts): provider_user_id is Google's `sub`.
+ */
+export const oauthAccounts = pgTable(
+  "oauth_accounts",
+  {
+    provider: text("provider").$type<"google">().notNull(),
+    providerUserId: text("provider_user_id").notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** The address the provider gave when it was linked, to show in Settings. */
+    email: text("email"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.provider, t.providerUserId] }),
+    uniqueIndex("oauth_accounts_user_provider_idx").on(t.userId, t.provider),
+    check("oauth_accounts_provider_check", sql`${t.provider} in ('google')`),
+  ],
 ).enableRLS();
 
 /**
@@ -198,7 +263,8 @@ export type AuditAction =
   | "membership.ended"
   | "sessions.revoked"
   | "password_reset.sent"
-  | "avatar.removed";
+  | "avatar.removed"
+  | "two_factor.disabled";
 
 export type User = typeof users.$inferSelect;
 export type Session = typeof sessions.$inferSelect;

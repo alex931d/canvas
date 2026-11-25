@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { connection } from "next/server";
 import { Suspense } from "react";
 import { HeaderAccount } from "@/components/landing/header-account";
 import { INNER, linkFocus, OUTER, SiteFooter, SiteHeader } from "@/components/landing/site-chrome";
 import { MEMBERSHIP } from "@/lib/billing/plan";
+import { contactEmail } from "@/lib/site/contact";
 import { cn } from "@/lib/utils";
 
 /**
@@ -23,19 +23,6 @@ export const metadata: Metadata = {
   title: "Terms of service",
   description: "The terms for using canvas: your account, the membership, your drawings and the rules.",
 };
-
-/**
- * Who to write to: CONTACT_EMAIL, else the address in EMAIL_FROM ("canvas <hello@…>") unless it's a
- * no-reply one. Set CONTACT_EMAIL in production: without an address, the page can only say "by email".
- */
-async function contactEmail(): Promise<string | null> {
-  await connection(); // read when the page is served, so a Docker image built without .env shows it
-  const explicit = process.env.CONTACT_EMAIL?.trim();
-  if (explicit) return explicit;
-  const from = process.env.EMAIL_FROM?.trim() ?? "";
-  const address = from.match(/<([^>]+)>/)?.[1] ?? (from.includes("@") ? from : "");
-  return address && !/^no-?reply@/i.test(address) && !address.endsWith("@localhost") ? address : null;
-}
 
 const SECTIONS = [
   { id: "who", title: "Who can use canvas" },

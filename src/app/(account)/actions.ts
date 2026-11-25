@@ -10,11 +10,12 @@ import {
   normalizeCode,
   sendVerificationCode,
 } from "@/lib/auth/email-verification";
-import { safeNext } from "@/lib/auth/next-path";
+import { safeNext, twoFactorPath } from "@/lib/auth/next-path";
 import { checkPasswordStrength, hashPassword } from "@/lib/auth/password";
 import { findResetLink, resetPassword, sendPasswordResetLink } from "@/lib/auth/password-reset";
 import { limiters } from "@/lib/auth/rate-limit";
 import { createSession, requireSignedIn, setSessionCookie } from "@/lib/auth/session";
+import { hasTwoFactor } from "@/lib/auth/two-factor";
 import { readMembership } from "@/lib/billing/membership";
 import { sendEmailLater } from "@/lib/email/send";
 import { passwordChangedEmail } from "@/lib/email/templates";
@@ -130,7 +131,10 @@ export async function setNewPassword(_prev: ResetState, formData: FormData): Pro
   if (!user) return { expired: true };
 
   await limiters.loginByAccount.reset(user.email);
-  await setSessionCookie(await createSession(user.id));
+  // The link proves they have the email, not the authenticator app: with
+  // two-factor on, the code is still asked for.
+  const twoFactor = await hasTwoFactor(user.id);
+  await setSessionCookie(await createSession(user.id, { twoFactorPending: twoFactor }));
   const origin = await emailLinkOrigin();
   sendEmailLater({
     to: user.email,
@@ -140,5 +144,5 @@ export async function setNewPassword(_prev: ResetState, formData: FormData): Pro
       resetLink: origin ? `${origin}/forgot-password` : null,
     }),
   });
-  redirect(await landingFor(user.id));
+  redirect(twoFactor ? twoFactorPath("/") : await landingFor(user.id));
 }

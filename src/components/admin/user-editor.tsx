@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from "react";
 import {
+  disableUserTwoFactor,
   removeUserAvatar,
   saveUser,
   sendResetLink,
@@ -154,6 +155,10 @@ export function SignOutEverywhereButton({ userId, disabled }: { userId: string; 
 
 export function RemoveAvatarButton({ userId, disabled }: { userId: string; disabled: boolean }) {
   return <ActionButton action={removeUserAvatar} fields={{ id: userId }} label="Remove profile picture" disabled={disabled} />;
+}
+
+export function DisableTwoFactorButton({ userId, disabled }: { userId: string; disabled: boolean }) {
+  return <ActionButton action={disableUserTwoFactor} fields={{ id: userId }} label="Turn off two-factor sign-in" disabled={disabled} />;
 }
 
 export function SendResetButton({ userId, disabled }: { userId: string; disabled: boolean }) {

@@ -30,14 +30,26 @@ setting() { sed -n "s/^$1=//p" .env | tail -1 | sed 's/^"\(.*\)"$/\1/'; }
 docker info >/dev/null 2>&1 || fail "Can't use Docker. Run deploy/setup-vps.sh first, or log in again (or use sudo) so you're in the docker group."
 
 # ---------------------------------------------------------------- settings
+random_hex() { openssl rand -hex "$1" 2>/dev/null || head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n'; }
+
 if [ ! -f .env ]; then
   cp .env.example .env
   chmod 600 .env
-  password=$(openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
-  sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=${password}/" .env
-  echo "Created deploy/.env with a database password."
+  sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(random_hex 24)/" .env
+  sed -i "s/^ENCRYPTION_KEY=.*/ENCRYPTION_KEY=$(random_hex 32)/" .env
+  echo "Created deploy/.env with a database password and an encryption key."
   echo "Fill in DOMAIN, Stripe and email there (nano deploy/.env), then run this again."
   exit 0
+fi
+
+# deploy/.env files made before two-factor sign-in existed: add the key once.
+if [ -z "$(setting ENCRYPTION_KEY)" ]; then
+  if grep -q '^ENCRYPTION_KEY=' .env; then
+    sed -i "s/^ENCRYPTION_KEY=.*/ENCRYPTION_KEY=$(random_hex 32)/" .env
+  else
+    printf '\n# Encrypts two-factor sign-in keys. Keep it, and keep a copy somewhere safe.\nENCRYPTION_KEY=%s\n' "$(random_hex 32)" >>.env
+  fi
+  echo "Added an ENCRYPTION_KEY to deploy/.env (for two-factor sign-in). Keep a copy somewhere safe."
 fi
 
 domain=$(setting DOMAIN)

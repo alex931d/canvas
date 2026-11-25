@@ -9,6 +9,7 @@ import { AdminToolbar } from "@/components/admin/toolbar";
 import {
   ComplimentaryButton,
   DetailsForm,
+  DisableTwoFactorButton,
   RemoveAvatarButton,
   SendResetButton,
   SignOutEverywhereButton,
@@ -415,6 +416,7 @@ const ACTION_TEXT: Record<string, (d: Record<string, unknown>) => string> = {
   "sessions.revoked": (d) => `signed them out everywhere (${Number(d.count ?? 0)} ${d.count === 1 ? "session" : "sessions"})`,
   "password_reset.sent": () => "emailed a password reset link",
   "avatar.removed": () => "removed their profile picture",
+  "two_factor.disabled": () => "turned off their two-factor sign-in",
 };
 
 function UserPanel({ actor, user }: { actor: SessionUser; user: UserDetail }) {
@@ -482,12 +484,18 @@ function UserPanel({ actor, user }: { actor: SessionUser; user: UserDetail }) {
         <h3 id="access-title" className={sectionTitle}>
           Signing in
         </h3>
-        <p className="mb-4 text-sm text-grey-500">
-          Signed in on {user.sessionCount} {user.sessionCount === 1 ? "device" : "devices"}.
-        </p>
+        <ul className="mb-4 grid gap-1 text-sm text-grey-500" data-testid="signing-in">
+          <li>
+            Signed in on {user.sessionCount} {user.sessionCount === 1 ? "device" : "devices"}.
+          </li>
+          <li>{user.hasPassword ? "Has a password." : "No password: logs in with Google."}</li>
+          <li>{user.googleEmail ? `Google connected (${user.googleEmail}).` : "Google not connected."}</li>
+          <li>Two-factor sign-in {user.twoFactorOn ? "on" : "off"}.</li>
+        </ul>
         <div className="grid gap-3">
           <SignOutEverywhereButton userId={user.id} disabled={!manage || perms.self} />
           <SendResetButton userId={user.id} disabled={!manage} />
+          {user.twoFactorOn ? <DisableTwoFactorButton userId={user.id} disabled={!manage || perms.self} /> : null}
           {user.avatarUrl ? <RemoveAvatarButton userId={user.id} disabled={!manage} /> : null}
         </div>
       </section>

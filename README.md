@@ -160,8 +160,11 @@ auth yourself. This app follows that guide, with no auth library: about 400 line
 
 | Table | Columns | Notes |
 | --- | --- | --- |
-| `users` | `id`, `name`, `email`, `password_hash`, `email_verified`, `role`, `level`, `created_at` | Unique index on `lower(email)`. `password_hash` is Argon2id (`m=19456, t=2, p=1`). `role` is `user`, `support` or `admin`. `level` is the study level (at least 1; see [Study buddies](#study-buddies)) |
-| `sessions` | `id`, `secret_hash`, `user_id`, `created_at`, `last_verified_at` | `secret_hash` is SHA-256 of the secret (32 bytes). Deleted with the user |
+| `users` | `id`, `name`, `email`, `password_hash`, `email_verified`, `role`, `level`, `created_at` | Unique index on `lower(email)`. `password_hash` is Argon2id (`m=19456, t=2, p=1`), or null for accounts made with Google. `role` is `user`, `support` or `admin`. `level` is the study level (at least 1; see [Study buddies](#study-buddies)) |
+| `sessions` | `id`, `secret_hash`, `user_id`, `created_at`, `last_verified_at`, `two_factor_pending` | `secret_hash` is SHA-256 of the secret (32 bytes). Pending sessions are waiting for a two-factor code. Deleted with the user |
+| `user_two_factor` | `user_id`, `totp_key`, `enabled_at`, `last_used_step` | The authenticator app's key, encrypted with `ENCRYPTION_KEY`; no `enabled_at` while it's being set up |
+| `two_factor_recovery_codes` | `user_id`, `code_hash`, `used_at` | SHA-256 of each recovery code |
+| `oauth_accounts` | `provider`, `provider_user_id`, `user_id`, `email` | Google accounts linked to canvas accounts (Google's `sub`) |
 | `email_verification_codes` | `user_id`, `email`, `code_hash`, `attempts`, `sent_at`, `expires_at` | One per account; `code_hash` is SHA-256 of the 8-digit code |
 | `password_reset_tokens` | `token_hash`, `user_id`, `email`, `created_at`, `expires_at` | `token_hash` is SHA-256 of the link's token |
 | `drawings` | + `user_id` | Owner; every query filters by it. Deleted with the user |
@@ -206,6 +209,66 @@ auth yourself. This app follows that guide, with no auth library: about 400 line
 - At most 3 reset emails go to one address in a row (then one per 20 minutes), so the form can't be
   used to flood someone's inbox.
 
+**Two-factor sign-in** (`src/lib/auth/two-factor.ts`)
+
+Anyone can turn it on in **Settings → Signing in**: scan the QR code with an authenticator app (Google
+Authenticator, 1Password, Authy, …; or type the key in), enter the code it shows, and save the 10
+recovery codes shown once. From then on, logging in (with a password, a reset link or Google) asks for
+a 6-digit code from the app, or a recovery code.
+
+- **Codes** are standard TOTP (RFC 6238: 6 digits, 30 seconds). The current code and one either side
+  are accepted (for phone clocks that are a little off), and each only once, so a code someone sees
+  you type is already spent. Recovery codes are 10 random characters, each working once.
+- **Storage:** the app's key is encrypted with AES-256-GCM under `ENCRYPTION_KEY`
+  (`src/lib/auth/secret-box.ts`), so a copy of the database or a backup alone doesn't give it away;
+  recovery codes are kept only as SHA-256 hashes. Without `ENCRYPTION_KEY` the setting isn't offered.
+  Keep the key: if it changes, codes from people's apps stop working (their recovery codes still do,
+  and they can set the app up again).
+- **The second step:** once the password checks out, the session is created **pending**. A pending
+  session counts as signed out everywhere (pages, Server Actions, the API) except the code page
+  `/login/two-factor`, lasts 10 minutes, and is replaced with a new session when the code is right.
+  **Not you?** on that page ends it.
+- **Limits:** 10 codes per account, then one every 30 s (guessing a code at that rate takes months).
+- Turning it on signs out every other device. Turning it off, or making new recovery codes, needs a
+  current code. Each change, and every login with a recovery code, is emailed.
+- **Locked out** (no phone, no recovery codes)? Staff can turn it off from the account's panel in
+  `/admin` (it's recorded in the history and the person is emailed). Check it's really them first,
+  for example by having them write from the account's address.
+
+**Google sign-in** (`src/lib/auth/google.ts`, `src/app/(auth)/login/google/`)
+
+**Continue with Google** on the login and sign-up pages, and **Connect Google** in Settings.
+
+- OAuth 2.0 with PKCE and a `state` check (a short-lived cookie only the Google routes see), via
+  [arctic](https://arcticjs.dev). Only the `openid email profile` scopes: canvas never sees anything
+  else in the Google account. The ID token comes straight from Google's token endpoint over HTTPS;
+  its audience, issuer and expiry are checked.
+- **Who it logs in:** the account this Google account is linked to; otherwise the account with the same
+  email, which gets linked, but only if Google says it has confirmed the address; otherwise a new
+  account with Google's name and email (it sees the membership first, like any new account).
+- **An unconfirmed sign-up** with that address (someone else could have made it) is taken over by
+  the address's owner: its password is removed and its sessions end, so whoever made it can't get in.
+- Accounts made with Google have no password. Logging in with one says to use Google; **Email me a link
+  to set one** in Settings adds a password (the reset link). Google can only be disconnected once
+  there's a password, so nobody locks themselves out. Linking Google to an account is emailed.
+- Two-factor sign-in still applies after Google.
+
+To turn it on, in the [Google Cloud console](https://console.cloud.google.com/):
+
+1. Create a project (or pick one), then **Google Auth Platform → Branding**: app name `canvas`, your
+   support email, and your domain under authorized domains. Under **Audience**, choose **External**
+   and publish the app (the basic scopes need no review).
+2. **Clients → Create client**: type **Web application**. Authorized redirect URIs:
+   `https://<your domain>/login/google/callback`, and `http://localhost:3000/login/google/callback` for
+   your machine.
+3. Copy the client's ID and secret straight away (Google only shows the secret once) into
+   `.env.local` (or `deploy/.env`) as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. They're read on
+   each request; without them the buttons don't show. New redirect URIs can take a few minutes to work.
+
+The button is plain text. Google's [branding
+guidelines](https://developers.google.com/identity/branding-guidelines) ask for their "G" logo on it;
+download it from that page if you want to follow them exactly.
+
 **CAPTCHA** (`src/lib/auth/captcha.ts`)
 
 The sign-up, login and forgot-password forms run a [Cloudflare
@@ -245,7 +308,8 @@ and confirmation emails leave the link out (the code still works).
   doesn't reveal who has an account.
 - Rate limits (`src/lib/auth/rate-limit.ts`): 3 sign-ups per IP with one more every 10 s; 20 login
   attempts per IP with one more each second; a growing delay (1 s up to 5 min) per account after
-  wrong passwords; 10 code entries per account with one more every 6 s; 10 "forgot password"
+  wrong passwords; 10 code entries per account with one more every 6 s; 10 two-factor codes per
+  account with one more every 30 s; 20 returns from Google per IP with one more every 3 s; 10 "forgot password"
   requests per IP with one more every 30 s; 10 new passwords from reset links per IP with one more
   every 10 s; 10 math checks per person with one more every 30 s.
 - **Where the limits are kept:** in Redis when `REDIS_URL` is set (`src/lib/redis.ts`), so they're
@@ -273,6 +337,8 @@ and confirmation emails leave the link out (the code still works).
 | `SMTP_URL`, `EMAIL_FROM` | Where emails go out (see Email above); without them they're printed to the console |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Turn the CAPTCHA on (see CAPTCHA above) |
 | `APP_URL` | This site's address, for links in emails and for Stripe (production) |
+| `ENCRYPTION_KEY` | 32 random bytes (`openssl rand -base64 32`) that encrypt two-factor keys; two-factor sign-in is only offered with it. Keep it |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Turn on Continue with Google (see Google sign-in above) |
 | `PASSWORD_BREACH_CHECK=off` | Skip the breached-password check (offline development) |
 | `INSECURE_COOKIES=true` | Drop `Secure` from the cookie when running `npm start` over plain `http://` on another machine (browsers allow `Secure` cookies on `localhost`) |
 
@@ -811,6 +877,9 @@ started or a turn already played, 410 one that has wandered off (or a battle tha
 
 `/settings` (Settings in the account menu) is open to anyone signed in with a confirmed email.
 
+**Signing in**: the password (set or change it with an emailed link), two-factor sign-in and Google
+(see [Accounts and sessions](#accounts-and-sessions)).
+
 **Name**: the same rules as signing up (up to 80 characters). It shows in the account menu at once,
 and to collaborators next to your cursor.
 
@@ -909,7 +978,10 @@ On `/study`: **Space** shows the answer, then **1**, **2** or **3** for Again, G
 ```
 src/
   app/
-    (auth)/login, (auth)/signup  login and sign-up pages; (auth)/actions.ts signs up, logs in, signs out
+    (auth)/login, (auth)/signup  login and sign-up pages; (auth)/actions.ts signs up, logs in, signs out,
+                                 checks two-factor codes
+    (auth)/login/two-factor      the code page, for a login waiting for its two-factor code
+    (auth)/login/google          Continue with Google: route.ts starts it, callback/ finishes it
     (account)/verify-email       enter the emailed code (all an unconfirmed account can open)
     (account)/forgot-password    ask for a reset link; (account)/reset-password/[token] sets the password
     (account)/actions.ts         confirm the code, send a new one, request a reset, save the new password
@@ -991,6 +1063,9 @@ src/
     auth/account.ts              create and find users
     auth/email-verification.ts   8-digit codes: send, re-send, check
     auth/password-reset.ts       reset links: send, look up, use
+    auth/two-factor.ts           authenticator app codes and recovery codes: set up, check, turn off
+    auth/secret-box.ts           AES-256-GCM with ENCRYPTION_KEY, for the two-factor keys
+    auth/google.ts               Google OAuth (arctic), linking Google accounts
     auth/captcha.ts              Turnstile siteverify (server); captcha-shared.ts for the forms
     auth/rate-limit.ts           the rate limits: token buckets and the per-account login throttle
     rate-limit/buckets.ts        how they work, in Redis (Lua) or in memory
@@ -1178,13 +1253,17 @@ node e2e/mock-ai.mjs &                                   # stand-in AI on :4010
 node e2e/mock-stripe.mjs &                               # stand-in Stripe on :12111
 node e2e/mock-turnstile.mjs &                            # stand-in Turnstile on :4030
 node e2e/mock-mail.mjs &                                 # SMTP on :2525, inbox on :2526
+node e2e/mock-google.mjs &                               # stand-in Google sign-in on :4040
 AI_BASE_URL=http://localhost:4010/v1 AI_MODEL=mock-vision \
 STRIPE_API_BASE=http://localhost:12111 STRIPE_SECRET_KEY=sk_test_mock \
 STRIPE_WEBHOOK_SECRET=whsec_mock STRIPE_PRICE_ID=price_mock \
 SMTP_URL=smtp://localhost:2525 \
 TURNSTILE_SITE_KEY=1x00000000000000000000AA TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA \
 TURNSTILE_SCRIPT_URL=http://localhost:4030/turnstile/v0/api.js \
-TURNSTILE_VERIFY_URL=http://localhost:4030/turnstile/v0/siteverify npm start
+TURNSTILE_VERIFY_URL=http://localhost:4030/turnstile/v0/siteverify \
+GOOGLE_CLIENT_ID=mock-client.apps.googleusercontent.com GOOGLE_CLIENT_SECRET=mock-google-secret \
+GOOGLE_AUTH_URL=http://localhost:4040/o/oauth2/v2/auth GOOGLE_TOKEN_URL=http://localhost:4040/token \
+ENCRYPTION_KEY="$(openssl rand -base64 32)" npm start
 AI_MODEL=mock-vision npm run test:e2e                    # in another terminal
 ```
 
@@ -1198,6 +1277,9 @@ it. `e2e/mock-turnstile.mjs` serves a widget script and `siteverify`: only token
 each, and it reports which form a token came from (real Turnstile is built to stop automated browsers,
 and its test keys accept any token). `TURNSTILE_SCRIPT_URL` and `TURNSTILE_VERIFY_URL` only exist for
 it. `e2e/mock-mail.mjs` keeps every email the app sends, for the tests to read codes and links from.
+`e2e/mock-google.mjs` is Google's account chooser (a form: type any email) and token endpoint; like
+Google, it checks the client secret, the redirect URI and the PKCE verifier. `GOOGLE_AUTH_URL` and
+`GOOGLE_TOKEN_URL` only exist for it.
 
 - `e2e/test-landing.mjs` (30 checks): `/` is the prerendered landing page when signed out and the
   drawings when signed in; the $5 membership on the page; headings, landmarks, alt text and keyboard
@@ -1214,6 +1296,20 @@ it. `e2e/mock-mail.mjs` keeps every email the app sends, for the tests to read c
   the billing portal; an editor that's open when the membership ends keeps changes locally and syncs
   them after renewing; failed payments (`past_due` keeps access, `unpaid` doesn't); unsigned, wrongly
   signed and unrelated webhooks; complimentary memberships with `npm run membership`.
+- `e2e/test-two-factor.mjs` (46 checks): setting two-factor up from Settings (QR code and key, a
+  wrong code, coming back mid-setup), the encrypted key and hashed recovery codes, other devices signed
+  out, logging in with a code (on to `?next=`), a pending login opening nothing else (pages or API),
+  a code that was just used, recovery codes (any case, once each), **Not you?**, the 10-minute limit,
+  the rate limit, a password reset still asking for the code, new recovery codes, turning it off with
+  a recovery code, staff turning it off from `/admin` (with the history), and every email.
+- `e2e/test-google.mjs` (33 checks, with `e2e/mock-google.mjs`): Continue with Google on both forms;
+  a new account (Google's name, email confirmed, no password, on to the membership); logging in
+  again and `?next=`; a Google-only account's password login, setting a password by email, then
+  disconnecting and reconnecting in Settings (with the email); cancelling; a return with no flow or a
+  wrong `state`; PKCE and the client secret checked on every exchange; linking an existing account by a
+  confirmed email and refusing an unconfirmed one; taking over an unconfirmed sign-up (its password and
+  session end); a Google account already linked elsewhere; two-factor after Google; and Google's `sub`,
+  not the email, being what's stored.
 - `e2e/test-auth.mjs` (37 checks): the landing page and login redirects when signed out; sign-up
   asking for the emailed code, and the code leading on to the membership page; sign-up validation and
   unique emails;
@@ -1386,8 +1482,9 @@ server peaks around 1.1 GB, which 2 GB plus the swap the setup adds covers (4 GB
    [deploy key](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys)
    or `gh auth login` to clone.
 3. **Fill in the settings.** `bash deploy/deploy.sh` creates `deploy/.env` with a generated database
-   password; fill in `DOMAIN`, Stripe and `SMTP_URL`/`EMAIL_FROM` there (`nano deploy/.env`), plus
-   Turnstile and the math checker if you use them. It's only readable by you and never committed.
+   password and `ENCRYPTION_KEY`; fill in `DOMAIN`, Stripe and `SMTP_URL`/`EMAIL_FROM` there
+   (`nano deploy/.env`), plus Turnstile, Google sign-in and the math checker if you use them. It's only
+   readable by you and never committed.
 4. **Start it:** `bash deploy/deploy.sh` again. It builds the image (a few minutes), starts everything,
    waits until the app answers its health check (`/api/health`), and prints the address.
 5. **Finish Stripe:** add the webhook endpoint `https://<your domain>/api/stripe/webhook` (events in
@@ -1419,6 +1516,10 @@ rsync -av you@your-server:canvas/deploy/backups/ ./canvas-backups/
 
 Or turn on your host's server backups or snapshots. To take one now:
 `docker compose exec backup sh /backup/backup.sh`.
+
+Keep a copy of `deploy/.env` somewhere safe too (a password manager is good): its `ENCRYPTION_KEY`
+is what unlocks the two-factor keys in the database. A backup restored without it still works, but
+people with two-factor on would need their recovery codes, then set their app up again.
 
 To **restore** one (it replaces everything in the database, in one transaction: if the file is damaged,
 nothing changes):

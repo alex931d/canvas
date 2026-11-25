@@ -8,6 +8,9 @@ import { emailVerificationCodes, passwordResetTokens, sessions, subscriptions, u
 import { audit } from "@/lib/admin/users";
 import { isValidEmail, normalizeEmail } from "@/lib/auth/account";
 import { sendPasswordResetLink } from "@/lib/auth/password-reset";
+import { turnOff } from "@/lib/auth/two-factor";
+import { sendEmailLater } from "@/lib/email/send";
+import { twoFactorOffEmail } from "@/lib/email/templates";
 import { can, canManage, isRole, roleChangeBlocked, type Permission, type Role } from "@/lib/auth/roles";
 import { getCurrentSession } from "@/lib/auth/session";
 import { apartText, DEFAULT_RULES, rulesFromForm, type WildRules } from "@/lib/buddy/rules";
@@ -202,6 +205,30 @@ export async function sendResetLink(_prev: AdminActionState, formData: FormData)
   await audit(db, actor.id, user.id, "password_reset.sent");
   refresh();
   return { ok: `Sent a reset link to ${user.email}.` };
+}
+
+/**
+ * Turn off someone's two-factor sign-in, for when they've lost their phone
+ * and their recovery codes. Check it's really them first (they write from
+ * the account's address). They're emailed, and can turn it on again.
+ */
+export async function disableUserTwoFactor(_prev: AdminActionState, formData: FormData): Promise<AdminActionState> {
+  const actor = await staff("users:edit");
+  if (!actor) return NO_ACCESS;
+  const user = await target(actor, formData.get("id"));
+  if (!isTarget(user)) return user;
+  if (user.id === actor.id) return { error: "To turn off your own, use Settings (it asks for a code)." };
+
+  const wasOn = await turnOff(user.id);
+  if (!wasOn) return { error: "Two-factor sign-in was already off." };
+  await audit(db, actor.id, user.id, "two_factor.disabled");
+  const origin = await emailLinkOrigin();
+  sendEmailLater({
+    to: user.email,
+    ...twoFactorOffEmail({ name: user.name, email: user.email, byStaff: true, resetLink: origin ? `${origin}/forgot-password` : null }),
+  });
+  refresh();
+  return { ok: "Turned off their two-factor sign-in, and emailed them." };
 }
 
 /** The site's seasonal theme: follow the calendar, show one now, or none. */

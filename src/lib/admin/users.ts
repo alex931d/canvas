@@ -3,7 +3,15 @@ import "server-only";
 import { and, count, desc, eq, ilike, ne, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
-import { auditEvents, sessions, subscriptions, users, type AuditAction } from "@/db/schema";
+import {
+  auditEvents,
+  oauthAccounts,
+  sessions,
+  subscriptions,
+  userTwoFactor,
+  users,
+  type AuditAction,
+} from "@/db/schema";
 import { avatarUrl } from "@/lib/profile/avatar";
 import type { Role } from "@/lib/auth/roles";
 import type { AdminQuery } from "./query";
@@ -127,6 +135,9 @@ export async function userDetail(id: string) {
       createdAt: users.createdAt,
       lastActiveAt: lastActive,
       sessionCount: sql<number>`(select count(*) from ${sessions} se where se.user_id = ${USER_ID})`.mapWith(Number),
+      hasPassword: sql<boolean>`${users.passwordHash} is not null`,
+      twoFactorOn: sql<boolean>`exists (select 1 from ${userTwoFactor} tf where tf.user_id = ${USER_ID} and tf.enabled_at is not null)`,
+      googleEmail: sql<string | null>`(select oa.email from ${oauthAccounts} oa where oa.user_id = ${USER_ID} and oa.provider = 'google')`,
     })
     .from(users)
     .where(eq(users.id, id));
