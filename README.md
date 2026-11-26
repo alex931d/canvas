@@ -405,7 +405,9 @@ read from the browser, and the server only says who's looking.
   changes becomes one write), then marks it saved in the document (`CollabDoc.confirmLocal`). The
   header says **Saved in this browser**; its panel explains what that means and offers a backup.
 - One tab edits a browser drawing at a time: each holds a Web Lock on it, and a second tab opens it
-  to look at, present and export, with a note saying it's open elsewhere.
+  to look at, present and export, with a note saying it's open elsewhere. That tab keeps waiting and
+  takes over by itself once the first one closes. A lock let go of a moment after opening (React
+  mounting the editor twice under `npm run dev`, a quick reload) is waited for, up to 1.5 s.
 - Member features stay in sight: Check math, Chemistry, Share and Flashcard show a lock and open
   the upgrade prompt (`src/components/billing/upgrade-dialog.tsx`), with what the membership includes
   and a link to the pricing page. The server enforces it too: the math check, flashcard, upload and
@@ -1599,11 +1601,11 @@ Google, it checks the client secret, the redirect URI and the PKCE verifier. `GO
   board; her pen stroke on his board while she's still drawing, not yet part of the drawing, growing,
   then landing without a gap or double; a rectangle as she drags it; his strokes reaching her as he
   draws, with his initials; and only finished elements saved.
-- `e2e/test-free.mjs` (61 checks): the free plan and joining. A visitor's Start drawing opening a
+- `e2e/test-free.mjs` (64 checks): the free plan and joining. A visitor's Start drawing opening a
   drawing with no account, drawing, a title and a picture kept in the browser's library and back
   after reloading, with nothing about it sent to the server; Check math, Chemistry, Share, the tool
   search and the selection's Check math offering the membership; the APIs refusing without an
-  account; a second tab looking but not editing; `/local` (New Drawing, Delete, a drawing that isn't
+  account; a second tab looking but not editing, then taking over when the first one leaves; `/local` (New Drawing, Delete, a drawing that isn't
   there); both plans on the pricing page; a signed-in non-member's home, whose New Drawing stays in
   the browser; paying moving the browser's drawings into the account (same id, title, contents and picture) and removing the browser's copy;
   a member moving one from the editor and one from the home page; importing again leaving the

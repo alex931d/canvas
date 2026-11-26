@@ -14,7 +14,10 @@ import { BrowserLibrary } from "./library";
  *
  * Only one tab edits a drawing at a time: each holds a Web Lock on it, and
  * a second tab opens it to look at, not to change, so neither overwrites
- * the other's work.
+ * the other's work. The second tab keeps waiting for the lock and takes
+ * over by itself once the first one closes. A lock that's let go of a
+ * moment after opening (React mounting the editor twice in development, a
+ * quick reload) is simply waited for.
  */
 
 export type BrowserSaveState = {
@@ -26,8 +29,11 @@ export type BrowserSaveState = {
 };
 
 const SAVE_DELAY_MS = 250;
+/** How long to wait for the lock before opening to look at instead of edit. */
+const LOCK_GRACE_MS = 1500;
 const RETRY_MS = 10_000;
 const lockName = (id: string) => `canvas-browser-drawing:${id}`;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export const STORAGE_FULL =
   "This browser's storage is full, so your latest changes aren't saved. Download a backup to keep them, or free up space.";
@@ -40,6 +46,10 @@ export class BrowserDrawingSession {
   private again = false;
   private disconnect: (() => void) | null = null;
   private releaseLock: (() => void) | null = null;
+  /** Stops waiting for the lock (closed before another tab let go). */
+  private stopWaiting: AbortController | null = null;
+  /** This session is the one saving (it has the lock). */
+  private saving = false;
   private closed = false;
 
   constructor(
@@ -64,15 +74,29 @@ export class BrowserDrawingSession {
 
   /**
    * Start saving. Resolves `editable: false` when another tab already has
-   * this drawing open for editing.
+   * this drawing open for editing; `onEditable` is called if that tab lets
+   * go later and this one takes over.
    */
-  async open(): Promise<{ editable: boolean }> {
-    const editable = await this.takeLock();
+  async open(onEditable?: () => void): Promise<{ editable: boolean }> {
+    const granted = this.takeLock();
+    const first = await Promise.race([granted, sleep(LOCK_GRACE_MS).then(() => null)]);
     if (this.closed) return { editable: false };
-    if (editable) {
-      this.disconnect = this.doc.connect({ onLocalBatch: () => this.schedule(), onSettled: () => {} });
+    if (first) {
+      this.startSaving();
+      return { editable: true };
     }
-    return { editable };
+    // Another tab is editing it: look for now, and edit once it's ours.
+    void granted.then((ours) => {
+      if (!ours || this.closed) return;
+      this.startSaving();
+      onEditable?.();
+    });
+    return { editable: false };
+  }
+
+  private startSaving() {
+    this.saving = true;
+    this.disconnect = this.doc.connect({ onLocalBatch: () => this.schedule(), onSettled: () => {} });
   }
 
   rename(title: string): Promise<void> {
@@ -116,8 +140,10 @@ export class BrowserDrawingSession {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.stopWaiting?.abort();
     try {
-      await this.flush();
+      // Only the tab that's saving writes what's waiting.
+      if (this.saving) await this.flush();
     } finally {
       this.disconnect?.();
       this.releaseLock?.();
@@ -180,24 +206,29 @@ export class BrowserDrawingSession {
     for (const l of this.listeners) l(next);
   }
 
-  /** Hold this drawing's lock while open; false if another tab holds it. */
+  /**
+   * Ask for this drawing's lock and hold it until closed. Resolves true once
+   * it's ours (which may be much later, when another tab lets go), false if
+   * this session closed first.
+   */
   private takeLock(): Promise<boolean> {
     const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
-    if (!locks) return Promise.resolve(true); // very old browsers: no guard
+    if (!locks) return Promise.resolve(true); // very old browsers, or plain http: no guard
+    const stop = new AbortController();
+    this.stopWaiting = stop;
     return new Promise((resolve) => {
-      void locks
-        .request(lockName(this.drawingId), { ifAvailable: true }, (lock) => {
-          if (!lock) {
+      locks
+        .request(lockName(this.drawingId), { signal: stop.signal }, () => {
+          if (this.closed) {
             resolve(false);
-            return undefined;
+            return undefined; // let go at once
           }
           resolve(true);
           return new Promise<void>((release) => {
             this.releaseLock = release;
-            if (this.closed) release();
           });
         })
-        .catch(() => resolve(true));
+        .catch(() => resolve(false)); // closed while waiting
     });
   }
 }

@@ -181,7 +181,7 @@ check(
   "with a way to the pricing page",
   !!(await page.$("[data-testid=upgrade-dialog] a[href='/pricing']")) && /\$5/.test(await text()),
 );
-check("and no lasso starts", !(await page.$("[data-tool=lasso][aria-pressed=true]")));
+check("and no lasso starts", !(await page.$("[data-tool=Lasso][aria-pressed=true]")));
 await closeDialog();
 await page.click("button[aria-label=Chemistry]");
 await waitFor(upgradeFeature);
@@ -230,6 +230,19 @@ await second.goto(`${BASE}/local/${firstId}`, { waitUntil: "load" });
 await waitFor(async () => /open in another tab/i.test(await text(second)), 10_000);
 check("a second tab opens it to look at, not to edit", /open in another tab/i.test(await text(second)));
 check("and shows the drawing", (await items(second)) === 2);
+check("with only the tools for looking", !(await second.$("[data-tool=Pen]")) && !!(await second.$("[data-tool=Select]")));
+// Once the first tab leaves the drawing, the second one takes over.
+await page.goto(`${BASE}/local`, { waitUntil: "networkidle0" });
+await second.bringToFront();
+const tookOver = await waitFor(async () => (await saveState(second)) === "saved" && !!(await second.$("[data-tool=Pen]")), 10_000);
+check("and takes over once the first tab leaves", !!tookOver && !/open in another tab/i.test(await text(second)));
+await stroke(second, 0, 120);
+await waitFor(async () => (await items(second)) === 3 && (await saveState(second)) === "saved");
+check("drawing there saves as usual", (await items(second)) === 3);
+await second.keyboard.down("Control");
+await second.keyboard.press("z");
+await second.keyboard.up("Control");
+await waitFor(async () => (await items(second)) === 2 && (await saveState(second)) === "saved");
 await second.close();
 await page.bringToFront();
 
