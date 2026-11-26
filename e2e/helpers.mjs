@@ -130,3 +130,16 @@ export async function pickTool(page, label) {
   await item.click();
   await sleep(100);
 }
+
+/**
+ * The file chooser that `act` opens. Puppeteer turns on catching the chooser
+ * over the protocol, and a key press sent straight after can get there first
+ * (the page opens its picker, nobody catches it); a moment's head start makes
+ * that a non-issue.
+ */
+export async function chooseFile(page, act, timeout = 10_000) {
+  const chooser = page.waitForFileChooser({ timeout });
+  await sleep(150);
+  await act();
+  return chooser;
+}
