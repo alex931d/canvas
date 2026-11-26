@@ -7,7 +7,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { drawings, workspaceMembers } from "@/db/schema";
 import { getCurrentSession, requireUser } from "@/lib/auth/session";
-import { getMembership, requireMember } from "@/lib/billing/membership";
+import { getMembership } from "@/lib/billing/membership";
 import { emptyDrawing, presentationSchema, titleSchema } from "@/lib/canvas/schema";
 import { canEdit, getRole } from "@/lib/collab/access";
 import { notify } from "@/lib/collab/notify";
@@ -37,10 +37,17 @@ const MEMBERSHIP_ENDED: SaveResult = {
   error: "Your membership has ended. Your changes are kept in this browser; renew to sync them.",
 };
 
-/** A new drawing, yours; with a `workspace` field, in that team workspace (if you can edit there). */
+/**
+ * A new drawing, yours; with a `workspace` field, in that team workspace (if
+ * you can edit there). Without a membership it's made in the browser instead
+ * (the free plan), so New Drawing works for everyone.
+ */
 export async function createDrawing(form?: FormData) {
-  const user = await requireMember();
+  const user = await requireUser();
   const workspace = form?.get("workspace");
+  if (!(await getMembership(user.id)).isMember) {
+    redirect(typeof workspace === "string" && workspace ? "/pricing" : "/local/new");
+  }
   let workspaceId: string | null = null;
   if (typeof workspace === "string" && workspace) {
     const parsed = idSchema.safeParse(workspace);

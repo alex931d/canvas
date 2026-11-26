@@ -269,6 +269,12 @@ await page.waitForSelector("[data-testid=free-plan]", { timeout: 10_000 });
 check("a signed-in non-member's home is the free plan", path() === "/" && /You're on the free plan/.test(await text()));
 await page.waitForSelector("[data-testid=browser-drawings]", { timeout: 10_000 });
 check("with this browser's drawings", /Free notes/.test(await text()));
+await page.click("main header form button[type=submit]");
+await waitFor(async () => /^\/local\/[0-9a-f-]{36}$/.test(path()), 15_000);
+const theirsId = path().split("/").pop();
+check("their New Drawing makes one in the browser", /^[0-9a-f-]{36}$/.test(theirsId) && theirsId !== firstId, path());
+await ready();
+check("not on the server", sql(`select count(*) from drawings where id = '${theirsId}'`) === "0");
 await page.goto(`${BASE}/local/${firstId}`, { waitUntil: "load" });
 await ready();
 check("their editor shows their account menu", !!(await page.$("button[aria-label^='Account: Fern']")));
@@ -284,8 +290,8 @@ await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.c
 await Promise.all([page.waitForNavigation({ waitUntil: "load" }), page.click("#pay")]);
 await page.waitForSelector("h1", { timeout: 10_000 });
 check("paying lands on the welcome", /You're a member/.test(await page.$eval("h1", (h) => h.textContent)));
-const moved = await waitFor(async () => /Moved 1 drawing/.test(await text()), 20_000);
-check("the browser's drawing moves into the account by itself", !!moved, (await text()).slice(0, 300));
+const moved = await waitFor(async () => /Moved 2 drawings/.test(await text()), 20_000);
+check("the browser's drawings move into the account by themselves", !!moved, (await text()).slice(0, 300));
 const row = sql(
   `select user_id || '|' || title || '|' || jsonb_array_length(data->'elements') from drawings where id = '${firstId}'`,
 ).split("|");
@@ -299,6 +305,7 @@ check(
   sql(`select count(*) from assets where drawing_id = '${firstId}' and mime_type = 'image/png'`) === "1",
 );
 check("and the browser's copy is gone", (await library()).drawings.length === 0 && (await library()).assets.length === 0);
+check("the other one moved too", sql(`select user_id from drawings where id = '${theirsId}'`) === me.id);
 
 await page.goto(BASE, { waitUntil: "networkidle0" });
 check("the member's gallery lists it", !!(await page.$(`main a[href='/drawings/${firstId}']`)));
@@ -370,11 +377,11 @@ await page.goto(BASE, { waitUntil: "networkidle0" });
 await page.waitForSelector("[data-testid=free-plan]", { timeout: 10_000 });
 check(
   "after it ends, the home page says the account's drawings are kept",
-  /Your membership has ended/.test(await text()) && /3 drawings in your account are kept safe/.test(await text()),
+  /Your membership has ended/.test(await text()) && /4 drawings in your account are kept safe/.test(await text()),
   (await text()).slice(0, 400),
 );
 check("and offers to renew", !!(await page.$("[data-testid=free-plan] a[href='/pricing']")));
-check("they're still in the database", sql(`select count(*) from drawings where user_id = '${me.id}'`) === "3");
+check("they're still in the database", sql(`select count(*) from drawings where user_id = '${me.id}'`) === "4");
 
 check("no page errors", problems.length === 0, problems.slice(0, 3).join(" | "));
 await browser.close();

@@ -385,7 +385,8 @@ landing pages list it from there) and `canUse(plan, feature)` is what the editor
 **The free plan** needs no account. **Start drawing** on the landing or pricing page opens
 `/local/new`, which makes a drawing in the browser and opens it at `/local/[id]`; `/local` lists the
 drawings in this browser (with New Drawing and Delete). Signed-in people without a membership get the
-same list on their home page, with what the membership adds. These pages are open to everyone
+same list on their home page, with what the membership adds; their New Drawing makes a drawing in the
+browser too (`createDrawing` sends them to `/local/new`). These pages are open to everyone
 (`/local` and `/local/…` are public paths in `src/lib/auth/constants.ts`); the drawing itself is
 read from the browser, and the server only says who's looking.
 
@@ -1386,13 +1387,13 @@ Google, it checks the client secret, the redirect URI and the PKCE verifier. `GO
   board; her pen stroke on his board while she's still drawing, not yet part of the drawing, growing,
   then landing without a gap or double; a rectangle as she drags it; his strokes reaching her as he
   draws, with his initials; and only finished elements saved.
-- `e2e/test-free.mjs` (58 checks): the free plan and joining. A visitor's Start drawing opening a
+- `e2e/test-free.mjs` (61 checks): the free plan and joining. A visitor's Start drawing opening a
   drawing with no account, drawing, a title and a picture kept in the browser's library and back
   after reloading, with nothing about it sent to the server; Check math, Chemistry, Share, the tool
   search and the selection's Check math offering the membership; the APIs refusing without an
   account; a second tab looking but not editing; `/local` (New Drawing, Delete, a drawing that isn't
-  there); both plans on the pricing page; a signed-in non-member's home; paying moving the browser's
-  drawing into the account (same id, title, contents and picture) and removing the browser's copy;
+  there); both plans on the pricing page; a signed-in non-member's home, whose New Drawing stays in
+  the browser; paying moving the browser's drawings into the account (same id, title, contents and picture) and removing the browser's copy;
   a member moving one from the editor and one from the home page; importing again leaving the
   account's copy alone; and a membership ending keeping the account's drawings.
 - `e2e/test-dock.mjs` (31 checks): the tool dock and search. Six slots holding every tool in one row;
