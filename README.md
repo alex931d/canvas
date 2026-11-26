@@ -36,7 +36,8 @@ animation, and its own component kit (with Radix underneath for menus and dialog
   spaced repetition (see [Flashcards and study](#flashcards-and-study)).
 - **Local-first saving**: every change is kept in the browser until the server has it, and reaches
   Postgres (and everyone else on the drawing) moments later, with fallbacks for when browser storage
-  is full (see below).
+  is full (see below). On the free plan the browser is where drawings live (see
+  [Free and membership](#free-and-membership)).
 - **Accounts**: email and password sign-up and login with database sessions, built the way the
   [Lucia](https://lucia-auth.com) guide describes, with email confirmation codes, password reset links
   and a [Cloudflare Turnstile](https://www.cloudflare.com/application-services/products/turnstile/)
@@ -44,10 +45,12 @@ animation, and its own component kit (with Radix underneath for menus and dialog
   ones shared with them.
 - **Landing page** at `/` for visitors who aren't logged in, opening with an animated math check
   (see below). Logged-in people get their drawings at `/` instead.
-- **Memberships**: using canvas takes a $5/month membership. The pricing page (`/pricing`, linked
-  from the landing page) is where people buy it, and where anyone signed in without one is sent to
-  start or renew it; Stripe Checkout takes the payment and Stripe's billing portal manages it (see
-  below).
+- **Free and membership**: anyone can draw for free, with no account; their drawings are saved in the
+  browser, with every drawing tool except math checks and the chemistry tools. The $5/month
+  membership keeps drawings in an account (moving the browser's drawings there when someone joins)
+  and adds math checks, chemistry tools, flashcards, drawing together and team workspaces. The
+  pricing page (`/pricing`) shows both; Stripe Checkout takes the payment and Stripe's billing portal
+  manages it (see [Free and membership](#free-and-membership)).
 - **Seasonal themes**: falling snow and candy canes at Christmas, bats, a spider and jack-o'-lanterns
   at Halloween, painted eggs and spring petals at Easter, on the landing and pricing pages and in the
   app's menu. They follow the calendar, or admins pick one (see below).
@@ -80,9 +83,10 @@ Signing up asks for a code sent to your email. Until you set up an email server 
 [Accounts and sessions](#accounts-and-sessions)), emails are printed in the terminal running
 `npm run dev`: copy the code from there.
 
-The first account you create takes ownership of any drawings made before accounts existed. New
-accounts need a membership before they can draw: grant yourself one as above (after entering the
-code), or set up Stripe (see [Memberships](#memberships)) and pay with a test card.
+The first account you create takes ownership of any drawings made before accounts existed.
+Anyone can draw without an account (the free plan keeps drawings in the browser). For server storage and the
+member tools, grant yourself a membership as above (after entering the code), or set up Stripe (see
+[Free and membership](#free-and-membership)) and pay with a test card.
 You need Node.js 20.9 or newer. Without Docker, point `DATABASE_URL` in `.env.local` at any PostgreSQL
 database you've created.
 
@@ -344,7 +348,9 @@ and confirmation emails leave the link out (the code still works).
 ## Landing page
 
 Visitors without a session cookie see a landing page at `/`; logged-in people get their drawings
-there instead. `src/proxy.ts` makes that call from the cookie and serves `src/app/welcome/page.tsx`,
+there instead. Its main button, **Start drawing**, opens a new drawing in the browser
+(`/local/new`) with no account; the header's **Open canvas** goes to the browser's drawings
+(`/local`). `src/proxy.ts` makes that call from the cookie and serves `src/app/welcome/page.tsx`,
 which reads no request data, so it's built once as static HTML. It's always at `/welcome` too, and the
 wordmark on the login and sign-up pages links back to it.
 
@@ -363,14 +369,62 @@ wordmark on the login and sign-up pages links back to it.
   `next.config.ts` sends every `.css` file through the Tailwind loader, which doesn't keep CSS-module
   class names.
 
-## Memberships
+## Free and membership
 
-Drawings, the editor, image uploads and math checks are for members.
+There are two ways to use canvas. `src/lib/billing/plan.ts` says what each includes (the pricing and
+landing pages list it from there) and `canUse(plan, feature)` is what the editor asks.
+
+| | Free | Membership, $5 a month |
+| --- | --- | --- |
+| Account | None needed | Needed (email confirmed) |
+| Where drawings are kept | This browser only (IndexedDB) | The account, on the server |
+| Drawing tools, images, GIFs and videos, equations, graphs, to-do boards, tracing, frames and slides | ✓ | ✓ |
+| Math checks, chemistry tools, flashcards | Offers the membership | ✓ |
+| Sharing and drawing live, team workspaces | Offers the membership | ✓ |
+
+**The free plan** needs no account. **Start drawing** on the landing or pricing page opens
+`/local/new`, which makes a drawing in the browser and opens it at `/local/[id]`; `/local` lists the
+drawings in this browser (with New Drawing and Delete). Signed-in people without a membership get the
+same list on their home page, with what the membership adds. These pages are open to everyone
+(`/local` and `/local/…` are public paths in `src/lib/auth/constants.ts`); the drawing itself is
+read from the browser, and the server only says who's looking.
+
+- Free drawings are kept by `BrowserLibrary` (`src/lib/local-store/library.ts`): one IndexedDB
+  database per browser (`canvas-browser`, not tied to an account), with the gallery's summaries, the
+  contents and the images, GIFs and videos. Nothing about them reaches the server. Creating the first
+  one asks the browser to keep the site's storage (`navigator.storage.persist`).
+- The editor is the same one members use, with `storage="browser"`: `BrowserDrawingSession`
+  (`src/lib/local-store/browser-session.ts`) writes each change moments after it's made (a run of
+  changes becomes one write), then marks it saved in the document (`CollabDoc.confirmLocal`). The
+  header says **Saved in this browser**; its panel explains what that means and offers a backup.
+- One tab edits a browser drawing at a time: each holds a Web Lock on it, and a second tab opens it
+  to look at, present and export, with a note saying it's open elsewhere.
+- Member features stay in sight: Check math, Chemistry, Share and Flashcard show a lock and open
+  the upgrade prompt (`src/components/billing/upgrade-dialog.tsx`), with what the membership includes
+  and a link to the pricing page. The server enforces it too: the math check, flashcard, upload and
+  drawing APIs answer 401 without an account and 402 without a membership.
+- If the browser's storage is full, the editor says the latest changes aren't saved and offers a
+  backup download; it tries again on the next change.
+
+**Joining moves the browser's drawings into the account.** Straight after paying, the welcome on
+`/membership` moves every drawing in the browser (`BrowserDrawingMover`,
+`src/lib/local-store/mover.ts`): the drawing goes to `POST /api/drawings/import` under the id it
+already had, each image, GIF and video it shows follows through the usual upload route, and only
+then is the browser's copy deleted. Anything that fails stays in the browser, with the reason. Moving
+is safe to retry (the server keeps a drawing it already has, and files it already has are skipped),
+and an id that belongs to someone else's drawing is refused. Members who find drawings left in a
+browser later (made while signed out, say) get **Move them to your account** on their home page, and
+**Move to your account** in the editor (Share leads there too).
+
+**When a membership ends**, the drawings in the account are kept. The home page says how many and
+offers to renew; new drawings are saved in the browser until then.
+
+### The membership
 
 **The pricing page** (`/pricing`, `src/app/pricing/page.tsx`) is open to everyone and linked from the
-landing page (**Pricing** in the header, **See what's included** under the hero, **Get membership** in
-the closing section). The plan is the same for everyone; the card's button is the next step for
-whoever is looking:
+landing page (**Pricing** in the header, **See the membership** under the hero, **Compare the plans**
+in the closing section). It shows both plans: Free, with **Start drawing**, and the membership, whose
+button is the next step for whoever is looking:
 
 | Who | The card offers |
 | --- | --- |
@@ -382,8 +436,8 @@ whoever is looking:
 | Member | **Open your drawings** and **Manage membership** |
 
 Below it, the three steps (create an account, confirm the email, start the membership) show which are
-done and which is next. Everything that needs a membership sends people without one here, and so
-does confirming a new account's email.
+done and which is next. Member features offer the membership and link here, and confirming a new
+account's email comes here too.
 
 `/membership` is the members' page: renewal date, **Manage billing** (Stripe's billing portal, for the
 card, invoices and cancelling) and the confirmation after paying. It's **Membership** in the account
@@ -398,13 +452,14 @@ menu; anyone without a membership who opens it goes to `/pricing`.
 - Someone is a member while a subscription is `active`, `trialing` or `past_due` (Stripe is still
   retrying a failed payment). A cancelled membership runs until the end of the paid month.
 - When a membership ends, the drawings stay in the database and in the browser. An editor that's open
-  stops syncing, says so, and syncs everything once they renew.
+  stops syncing, says so, and syncs everything once they renew. Until then the person is on the free
+  plan (see above).
 - `users.stripe_customer_id` links each account to one Stripe customer, created the first time they
   start a membership and reused after that.
 - Complimentary memberships (for you, testers, friends) are rows whose id starts with `comp_`:
   `npm run membership -- grant|revoke|show <email>`. Stripe never sees them. Granting needs the
   account's email to be confirmed first, since anyone can sign up with any address.
-- The price shown on the site comes from `src/lib/billing/plan.ts`.
+- The price shown on the site, and what each plan includes, come from `src/lib/billing/plan.ts`.
 
 **Setting up Stripe**
 
@@ -439,7 +494,8 @@ at Stripe Tax if you need them.
 `/terms` (`src/app/terms/page.tsx`) is public, linked from the footer of the landing, pricing and
 terms pages, from the sign-up form ("By creating an account you agree to the terms of service") and
 from the pricing card before checkout. It's written in plain language and covers who can use canvas
-(13 and up; a parent or guardian agrees for anyone under 18), accounts, the membership (the price comes
+(13 and up; a parent or guardian agrees for anyone under 18), using canvas for free (drawings kept in the
+browser only), accounts, the membership (the price comes
 from `src/lib/billing/plan.ts`, so it always matches; monthly renewal, cancelling from `/membership`,
 no refunds for partial months except where the law requires, 30 days' notice of a new price), your
 content (it stays yours; what canvas does with it), fair use, AI math checks being a second opinion,
@@ -939,7 +995,10 @@ src/
     (account)/forgot-password    ask for a reset link; (account)/reset-password/[token] sets the password
     (account)/actions.ts         confirm the code, send a new one, request a reset, save the new password
     welcome/page.tsx             landing page (served at / to visitors without a session)
-    pricing/page.tsx             the plan, and the next step for whoever's looking (join, renew, confirm email)
+    pricing/page.tsx             both plans, and the membership's next step for whoever's looking (join, renew, confirm
+                                 email)
+    local/                       the free plan, no account needed: this browser's drawings; new/ makes one; [id]/ the
+                                 editor for one
     terms/page.tsx               the terms of service (public)
     membership/                  members' page (billing portal, confirmation after paying); actions start Checkout
     admin/page.tsx               admin dashboard: totals, search, role filter, ← 1 2 3 4 5 → pager, edit panel
@@ -948,7 +1007,8 @@ src/
     settings/                    name, profile picture and effects; actions.ts saves them
     api/site/theme               GET the seasonal theme mode (public, cached a minute)
     api/stripe/webhook           Stripe webhooks: keeps memberships in step with Stripe
-    page.tsx                     gallery: your drawings, shared with you, flashcards due
+    page.tsx                     gallery: your drawings, shared with you, flashcards due (without a membership: the
+                                 drawings in this browser and what the membership adds)
     drawings/[id]/page.tsx       editor page
     join/[token]/page.tsx        where invite links lead
     join/workspace/[token]/      where workspace invite links (and emailed invitations) lead
@@ -964,13 +1024,14 @@ src/
     api/drawings/[id]/presence   POST cursor and selection (passed on, not stored)
     api/drawings/[id]/thumbnail  POST the gallery preview
     api/drawings/[id]/assets     POST an image, GIF or video (multipart)
+    api/drawings/import          POST a drawing from the browser into a new member's account (same id; safe to retry)
     api/assets/[id]              GET it (cached forever; ids never change), with byte ranges
     api/flashcards               POST a card (multipart, with an optional picture); [id]/image serves it
     api/check-math               POST a selection image -> verdict JSON
     api/avatars/[userId]         GET a profile picture (signed in; cached privately per version)
   components/
     app-sidebar.tsx              dark sidebar: bottom bar on phones, icon rail on tablets (not in the editor)
-    user-menu.tsx                avatar + account menu (Settings, Membership, Sign out)
+    user-menu.tsx                avatar + account menu (Settings, Membership, Sign out); GuestMenu without an account
     motion/                      Reveal (slide in and out on scroll) and MotionProvider (reduced motion)
     settings/                    profile (picture and name) and effects, with their live examples
     auth/auth-form.tsx           login and sign-up forms
@@ -982,6 +1043,7 @@ src/
                                  decorations, the mode and the "hide" preference
     landing/                     the landing page's animated opening scene and editor screenshot
     billing/membership-buttons   Start membership, Manage billing, Log out
+    billing/upgrade-dialog.tsx   what a member feature does and what the membership includes, for the free plan
     editor/tool-dock.tsx         the tools, grouped in a dock at the bottom of the board
     editor/tool-search.tsx       find a tool or command by name (/ or ⌘K)
     editor/tools.ts              ToolRegistry: every tool, its key, icon, words, and the dock's groups
@@ -996,7 +1058,9 @@ src/
       clipboard.ts               BoardClipboard: one per tab, so copies paste into other drawings
       shortcuts.ts               Shortcuts: which key does what (a pure mapping to commands)
       placement.ts               where floating editors and the selection bar go on screen
-    editor/canvas-editor.tsx     editor shell: local-first saving, live sync, presence, header, export
+    editor/canvas-editor.tsx     editor shell: local-first saving, live sync, presence, header, export; with
+                                 storage="browser", the free plan's saving and the locks on member features
+    editor/browser-editor.tsx    reads a free drawing from the browser and opens the editor on it
     editor/style-bar.tsx         per-tool options (brush, colour, width, sketchy, font)
     editor/math-card.tsx         AI result card (KaTeX)
     editor/equation-editor.tsx   LaTeX / chemistry popover with live preview
@@ -1009,7 +1073,8 @@ src/
     editor/trace-picture-dialog.tsx  Trace a picture: the box, the preview, Detail, Add to canvas
     editor/slides-panel.tsx      the frames as slides: order, titles, pictures, style, Present
     editor/presenter.tsx         full-screen slides: keys, swipes, fade / slide / fly
-    gallery/                     overview cards, drawing grids, delete / leave / move between workspaces
+    gallery/                     overview cards, drawing grids, delete / leave / move between workspaces;
+                                 browser-gallery.tsx: this browser's drawings and moving them into an account
     workspaces/                  new workspace form, invitations, the people panel, the name and its menu
     study/                       review session, card list
     kit/                         the component kit: buttons, fields, menus, dialogs, toasts…
@@ -1041,9 +1106,9 @@ src/
     email/send.ts                SMTP via nodemailer, or the console when SMTP_URL isn't set
     email/templates.ts           the code, reset and "password changed" emails (text and HTML)
     site-url.ts                  this site's address, and the one links in emails use
-    billing/plan.ts              the plan: $5 a month, and what it includes
+    billing/plan.ts              the plans: free and $5 a month, what each includes, canUse
     billing/stripe.ts            the Stripe client and its settings
-    billing/membership.ts        who's a member: getMembership, requireMember
+    billing/membership.ts        who's a member: getMembership, requireMember, getViewerPlan
     billing/sync.ts              Stripe customers, and copying subscriptions from Stripe
     canvas/schema.ts             drawing JSON format (zod), shared by client and server
     canvas/render.ts             Canvas 2D rendering, exports, thumbnails
@@ -1069,7 +1134,8 @@ src/
     math/expr.ts                 function-of-x parser for graphs
     chem/                        periodic table, formula parser and molar mass, balancer
     study/                       flashcard queries and the Leitner schedule
-    local-store/                 IndexedDB outbox and images, quota fallbacks
+    local-store/                 IndexedDB outbox and images, quota fallbacks; the free plan's library.ts,
+                                 browser-session.ts (saving an open drawing) and mover.ts (into an account)
     ai/check-math.ts             provider call + prompt (server-only)
 scripts/migrate.mjs              applies the migrations in drizzle/ (npm run db:migrate)
 scripts/stripe-setup.mjs         creates the Stripe product and price (npm run stripe:setup)
@@ -1118,7 +1184,7 @@ stops when the system asks for reduced motion.
 `users.stripe_customer_id` links an account to its Stripe customer.
 `subscriptions`: `id` (Stripe's `sub_...`, or `comp_...`), `user_id` (cascade delete), `customer_id`,
 `status`, `price_id`, `current_period_end`, `cancel_at` (set once cancelled), `ended_at`. See
-[Memberships](#memberships).
+[Free and membership](#free-and-membership).
 `drawings`: `id`, `user_id` (the owner), `title`, `data` (jsonb), `presentation` (jsonb: `style`,
 `stage`, `numbers`; null until set, see [Frames and presenting](#frames-and-presenting)), `thumbnail`,
 `version` (bumped by every applied change), `share_token` (the invite link's secret, null when off),
@@ -1187,6 +1253,10 @@ position and zoom are remembered per drawing and per device, in `localStorage`.
    copies left by the previous, whole-drawing format are turned into a batch the first time the drawing
    opens.)
 
+On the free plan there's no server to send to: the browser's library is where the drawing lives, and
+each change is written there moments after it's made (see [Free and membership](#free-and-membership)).
+What follows is about members' drawings.
+
 ### When browser storage runs out
 
 IndexedDB, OPFS and the Cache API share **one quota per site**, so switching between them frees
@@ -1240,20 +1310,22 @@ it. `e2e/mock-mail.mjs` keeps every email the app sends, for the tests to read c
 Google, it checks the client secret, the redirect URI and the PKCE verifier. `GOOGLE_AUTH_URL` and
 `GOOGLE_TOKEN_URL` only exist for it.
 
-- `e2e/test-landing.mjs` (30 checks): `/` is the prerendered landing page when signed out and the
-  drawings when signed in; the $5 membership on the page; headings, landmarks, alt text and keyboard
-  focus; the sign-up, login and pricing links; the hero animation's start and end, and reduced motion; no
-  sideways scrolling from 360 to 1920 px wide; the terms of service (public, twelve numbered sections
-  with working contents links, the plan's price, linked from the footers and the sign-up form, fitting a
-  360 px phone); no console errors or failed requests.
+- `e2e/test-landing.mjs` (31 checks): `/` is the prerendered landing page when signed out and the
+  drawings when signed in; drawing for free and the $5 membership on the page; headings, landmarks,
+  alt text and keyboard focus; Start drawing, Open canvas, the login and pricing links; the hero
+  animation's start and end, and reduced motion; no sideways scrolling from 360 to 1920 px wide; the
+  terms of service (public, thirteen numbered sections with working contents links, the plan's price
+  and where free drawings are kept, linked from the footers and the sign-up form, fitting a 360 px
+  phone); no console errors or failed requests.
 - `e2e/test-billing.mjs` (54 checks): the pricing page for a visitor, an unconfirmed account, a new
   account, a lapsed member and a member, with the steps marked (and agreeing to the terms before
   checkout); the landing page's links to it;
-  confirming the email leading there, and everything else (the drawings, `/membership`) sending
-  non-members there; backing out of Checkout; paying, and the membership being there before the
+  confirming the email leading there, a non-member's home being the free plan and `/membership`
+  sending them there; backing out of Checkout; paying, and the membership being there before the
   webhook arrives; the stored customer, price and renewal date; cancelling, renewing and ending it in
   the billing portal; an editor that's open when the membership ends keeps changes locally and syncs
-  them after renewing; failed payments (`past_due` keeps access, `unpaid` doesn't); unsigned, wrongly
+  them after renewing, with home saying the account's drawings are kept; failed payments (`past_due`
+  keeps the membership, `unpaid` doesn't); unsigned, wrongly
   signed and unrelated webhooks; complimentary memberships with `npm run membership`.
 - `e2e/test-two-factor.mjs` (46 checks): setting two-factor up from Settings (QR code and key, a
   wrong code, coming back mid-setup), the encrypted key and hashed recovery codes, other devices signed
@@ -1314,6 +1386,15 @@ Google, it checks the client secret, the redirect URI and the PKCE verifier. `GO
   board; her pen stroke on his board while she's still drawing, not yet part of the drawing, growing,
   then landing without a gap or double; a rectangle as she drags it; his strokes reaching her as he
   draws, with his initials; and only finished elements saved.
+- `e2e/test-free.mjs` (58 checks): the free plan and joining. A visitor's Start drawing opening a
+  drawing with no account, drawing, a title and a picture kept in the browser's library and back
+  after reloading, with nothing about it sent to the server; Check math, Chemistry, Share, the tool
+  search and the selection's Check math offering the membership; the APIs refusing without an
+  account; a second tab looking but not editing; `/local` (New Drawing, Delete, a drawing that isn't
+  there); both plans on the pricing page; a signed-in non-member's home; paying moving the browser's
+  drawing into the account (same id, title, contents and picture) and removing the browser's copy;
+  a member moving one from the editor and one from the home page; importing again leaving the
+  account's copy alone; and a membership ending keeping the account's drawings.
 - `e2e/test-dock.mjs` (31 checks): the tool dock and search. Six slots holding every tool in one row;
   a group's arrow listing its tools, the slot remembering the last one, a second press opening it,
   keys moving the dock along, Insert's list, Undo and Redo; the search (/ and ⌘K, other words,
@@ -1411,7 +1492,7 @@ updates go from memory, nothing extra to pay for; see [Live traffic](#live-traff
 The files are `Dockerfile`, `.dockerignore` and `deploy/`.
 
 **What you need:** a VPS with Ubuntu 24.04+ or Debian 12+, a domain, and the Stripe and email settings
-from [Memberships](#memberships) and [Quick start](#quick-start). The smallest plans are enough: running,
+from [Free and membership](#free-and-membership) and [Quick start](#quick-start). The smallest plans are enough: running,
 the app takes about 350 MB of memory, Postgres about 120 MB and Redis under 10 MB; building it on the
 server peaks around 1.1 GB, which 2 GB plus the swap the setup adds covers (4 GB is comfortable).
 
@@ -1436,7 +1517,7 @@ server peaks around 1.1 GB, which 2 GB plus the swap the setup adds covers (4 GB
 4. **Start it:** `bash deploy/deploy.sh` again. It builds the image (a few minutes), starts everything,
    waits until the app answers its health check (`/api/health`), and prints the address.
 5. **Finish Stripe:** add the webhook endpoint `https://<your domain>/api/stripe/webhook` (events in
-   [Going live](#memberships)) and put its signing secret in `STRIPE_WEBHOOK_SECRET`, then
+   [Going live](#the-membership)) and put its signing secret in `STRIPE_WEBHOOK_SECRET`, then
    `bash deploy/deploy.sh` once more.
 6. **Make yourself an admin** once you've signed up (from `deploy/`):
    `docker compose exec app node scripts/role.mjs set you@example.com admin`. The membership script

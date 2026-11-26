@@ -17,16 +17,17 @@ import { cn } from "@/lib/utils";
  * changes 30 days ahead (section 11 promises it).
  */
 
-const UPDATED = { iso: "2026-11-23", text: "November 23, 2026" };
+const UPDATED = { iso: "2026-11-26", text: "November 26, 2026" };
 
 export const metadata: Metadata = {
   title: "Terms of service",
-  description: "The terms for using canvas: your account, the membership, your drawings and the rules.",
+  description: "The terms for using canvas: the free plan, your account, the membership, your drawings and the rules.",
 };
 
 const SECTIONS = [
   { id: "who", title: "Who can use canvas" },
   { id: "account", title: "Your account" },
+  { id: "free", title: "Using canvas for free" },
   { id: "membership", title: "Membership and payment" },
   { id: "content", title: "Your drawings and other content" },
   { id: "rules", title: "Using canvas fairly" },
@@ -115,8 +116,8 @@ export default function TermsPage() {
 
             <article className="max-w-[42rem] space-y-10 text-[17px] leading-[1.7] text-grey-900">
               <p className="text-lg leading-relaxed">
-                These terms are the agreement between you and canvas for using the canvas website and app. By
-                creating an account or using canvas, you agree to them. If you don&apos;t agree, please don&apos;t use
+                These terms are the agreement between you and canvas for using the canvas website and app, with or
+                without an account. By creating an account or using canvas, you agree to them. If you don&apos;t agree, please don&apos;t use
                 canvas.
               </p>
 
@@ -143,11 +144,36 @@ export default function TermsPage() {
                 </ul>
               </Section>
 
+              <Section id="free">
+                <ul>
+                  <li>
+                    You can draw on canvas for free, without an account. Free drawings, and the images and videos on
+                    them, are saved in your browser on your device. They don&apos;t reach our servers.
+                  </li>
+                  <li>
+                    Because they&apos;re only in your browser, free drawings aren&apos;t on your other devices, and
+                    clearing your browser&apos;s data, or anyone using that browser, can delete them. We can&apos;t get
+                    them back. Download a backup from a drawing&apos;s Export menu to keep a copy.
+                  </li>
+                  <li>
+                    Math checks, the chemistry tools, flashcards, sharing and team workspaces are part of the
+                    membership.
+                  </li>
+                  <li>
+                    When you start a membership, the drawings saved in that browser are moved into your account.
+                  </li>
+                </ul>
+              </Section>
+
               <Section id="membership">
                 <ul>
                   <li>
-                    Using canvas takes a membership. It costs {MEMBERSHIP.price} {MEMBERSHIP.per} in US dollars, plus
-                    any tax that applies where you live.
+                    The membership costs {MEMBERSHIP.price} {MEMBERSHIP.per} in US dollars, plus any tax that applies
+                    where you live. It keeps your drawings in your account and adds the features listed on the{" "}
+                    <Link href="/pricing" className={link}>
+                      pricing
+                    </Link>{" "}
+                    page.
                   </li>
                   <li>
                     Payments are handled by Stripe, and Stripe&apos;s terms apply to them too. We never see or store
@@ -162,8 +188,8 @@ export default function TermsPage() {
                     <Link href="/membership" className={link}>
                       Membership
                     </Link>{" "}
-                    page. Cancelling stops the next renewal; you keep using canvas until the end of the month you&apos;ve
-                    paid for.
+                    page. Cancelling stops the next renewal; you keep the membership until the end of the month you&apos;ve
+                    paid for. After that, the drawings in your account are kept for when you come back.
                   </li>
                   <li>We don&apos;t refund partial months, except where the law requires us to.</li>
                   <li>If a payment fails, we may pause your membership until it goes through.</li>

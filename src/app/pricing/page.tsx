@@ -17,20 +17,21 @@ import { SeasonalBoardDecor, SeasonalEffects } from "@/components/seasonal/site-
 import { Button, Skeleton } from "@/components/kit";
 import { getCurrentSession, type SessionUser } from "@/lib/auth/session";
 import { getMembership, type Membership } from "@/lib/billing/membership";
-import { CENTS_A_DAY, MEMBERSHIP, MEMBERSHIP_INCLUDES } from "@/lib/billing/plan";
+import { CENTS_A_DAY, FREE_INCLUDES, MEMBERSHIP, MEMBERSHIP_INCLUDES } from "@/lib/billing/plan";
 import { Reveal } from "@/components/motion/reveal";
 import { cn } from "@/lib/utils";
 
 /**
- * The membership, for everyone: visitors arrive from the landing page, and
- * signed-in people without a membership are sent here to start (or renew)
- * one. The plan is static; what the card offers depends on who's looking,
- * so that part renders per request.
+ * The two plans, for everyone: free (no account, drawings in the browser)
+ * and the membership. Visitors arrive from the landing page, and anyone
+ * reaching for a member feature is sent here. The plans are static; what
+ * the membership card offers depends on who's looking, so that part renders
+ * per request.
  */
 
 export const metadata: Metadata = {
   title: "Pricing",
-  description: `One membership with everything in canvas: ${MEMBERSHIP.price} ${MEMBERSHIP.per}, cancel any time.`,
+  description: `Draw for free in your browser, no account needed. The membership, ${MEMBERSHIP.price} ${MEMBERSHIP.per}, keeps your drawings in your account and adds math checks, chemistry tools, flashcards and drawing together.`,
 };
 
 type Viewer =
@@ -84,7 +85,7 @@ async function PlanActions({ searchParams }: { searchParams: PageProps<"/pricing
             <Link href="/login?next=%2Fpricing" className={quietLink}>
               Log in
             </Link>{" "}
-            to start your membership.
+            to start your membership. Drawings already in this browser come with you.
           </p>
         </div>
       );
@@ -115,7 +116,7 @@ async function PlanActions({ searchParams }: { searchParams: PageProps<"/pricing
               ) : (
                 "Your membership isn't active right now."
               )}{" "}
-              Your drawings are waiting for you.
+              The drawings in your account are waiting for you.
             </Notice>
           ) : null}
           <StartMembershipButton label={ended ? "Renew membership" : "Start membership"} variant="light" />
@@ -162,7 +163,10 @@ function ActionsSkeleton() {
 const STEPS = [
   { title: "Create an account", text: "Your name, email and a password." },
   { title: "Confirm your email", text: "Enter the 8-digit code we send you." },
-  { title: "Start your membership", text: `Pay ${MEMBERSHIP.price} on Stripe's checkout page, and start drawing.` },
+  {
+    title: "Start your membership",
+    text: `Pay ${MEMBERSHIP.price} on Stripe's checkout page. Drawings already in this browser move into your account.`,
+  },
 ] as const;
 
 /** The three steps, with the ones already done ticked off. */
@@ -208,8 +212,20 @@ function StepList({ done }: { done: number }) {
 
 const QUESTIONS = [
   {
-    q: "What do I get?",
-    a: "Everything in canvas: unlimited drawings, math checks, equations and graphs, the chemistry tools, flashcards, to-do boards and drawing live with other members. There's only one plan.",
+    q: "What's free?",
+    a: "Every drawing tool, with no account: pens and shapes, text, images, GIFs and videos, equations and graphs, to-do boards, tracing pictures, and frames you can present as slides.",
+  },
+  {
+    q: "Where are free drawings kept?",
+    a: "In the browser you made them in, on that device. They never reach our server, so they won't be on your other devices, and clearing the browser's data deletes them. Download a backup from the Export menu to keep a copy.",
+  },
+  {
+    q: "What does the membership add?",
+    a: "Your drawings kept in your account, on every device you sign in on; step-by-step math checks; the chemistry tools; flashcards; drawing live with others; and team workspaces.",
+  },
+  {
+    q: "What happens to my drawings when I join?",
+    a: "The drawings in your browser move into your account, pictures and all, as soon as your membership starts. Nothing to export or upload yourself.",
   },
   {
     q: "How do I pay?",
@@ -217,15 +233,15 @@ const QUESTIONS = [
   },
   {
     q: "Can I cancel?",
-    a: "Yes, any time, from Manage billing on your membership page. You keep access until the end of the month you've paid for, and your drawings stay in your account if you come back.",
+    a: "Yes, any time, from Manage billing on your membership page. You keep the membership until the end of the month you've paid for. After that the drawings in your account are kept for when you come back, and new drawings save in your browser again.",
   },
   {
     q: "What if a payment doesn't go through?",
-    a: "Stripe tries the payment again, and you keep access while it does. Update your card in billing to keep going.",
+    a: "Stripe tries the payment again, and you keep the membership while it does. Update your card in billing to keep going.",
   },
   {
     q: "Can classmates open my drawings?",
-    a: "Share a drawing with a link and anyone with a membership can join it, live. Shared drawings are part of the membership for them too.",
+    a: "Drawing together is part of the membership: share a drawing with a link and anyone with a membership can join it, live.",
   },
 ] as const;
 
@@ -244,24 +260,26 @@ export default function PricingPage({ searchParams }: PageProps<"/pricing">) {
       <main className="flex-1">
         <section aria-labelledby="pricing-title" className={OUTER}>
           <div
-            className="relative mx-auto grid max-w-[1392px] gap-12 overflow-hidden rounded-xl bg-white px-5 py-10 sm:px-12 sm:py-14 lg:grid-cols-[minmax(0,1fr)_480px] lg:items-center xl:gap-16 xl:px-16 xl:py-20"
+            className="relative mx-auto max-w-[1392px] overflow-hidden rounded-xl bg-white px-5 py-10 sm:px-12 sm:py-14 xl:px-16 xl:py-20"
             style={DOT_GRID}
           >
             <SeasonalBoardDecor />
-            <div>
-              <h1
-                id="pricing-title"
-                className="text-[42px] leading-[1.02] font-extrabold tracking-[-0.035em] text-balance sm:text-[60px]"
-              >
-                One membership, everything in canvas
-              </h1>
-              <p className="mt-6 max-w-[32rem] text-lg leading-relaxed text-grey-500">
-                Write and check math, study with flashcards, and work on drawings with classmates. No tiers and no
-                add-ons.
-              </p>
+            <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end xl:gap-16">
+              <div>
+                <h1
+                  id="pricing-title"
+                  className="text-[42px] leading-[1.02] font-extrabold tracking-[-0.035em] text-balance sm:text-[60px]"
+                >
+                  Draw for free. Join for the rest.
+                </h1>
+                <p className="mt-6 max-w-[36rem] text-lg leading-relaxed text-grey-500">
+                  Every drawing tool is free and needs no account: your drawings save in your browser. The membership
+                  keeps them in your account and adds math checks, chemistry, flashcards and drawing together.
+                </p>
+              </div>
 
               {/* The price, worked out by hand the way it would be on the canvas */}
-              <figure className="relative mt-12 w-fit font-hand text-[34px] leading-[1.3] sm:text-[40px]">
+              <figure className="relative mx-6 mb-4 w-fit font-hand text-[34px] leading-[1.3] sm:text-[40px] lg:mr-8">
                 <svg
                   aria-hidden
                   viewBox="0 0 360 170"
@@ -287,24 +305,59 @@ export default function PricingPage({ searchParams }: PageProps<"/pricing">) {
               </figure>
             </div>
 
-            <div className="rounded-xl bg-grey-900 p-6 text-white sm:p-8">
-              <h2 className="text-lg font-bold">canvas membership</h2>
-              <p className="mt-3 flex items-baseline gap-2">
-                <span className="text-[64px] leading-none font-extrabold tracking-[-0.03em]">{MEMBERSHIP.price}</span>
-                <span className="text-lg text-grey-300">{MEMBERSHIP.per}</span>
-              </p>
-              <ul className="mt-6 space-y-3">
-                {MEMBERSHIP_INCLUDES.map((item) => (
-                  <li key={item} className="flex items-start gap-3">
-                    <Check className="mt-0.5 size-5 shrink-0 text-cyan" aria-hidden />
-                    {item}
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-8 border-t border-white/10 pt-6">
-                <Suspense fallback={<ActionsSkeleton />}>
-                  <PlanActions searchParams={searchParams} />
-                </Suspense>
+            <div className="mt-12 grid gap-4 lg:grid-cols-2 lg:gap-6">
+              {/* Free: the canvas itself, in this browser */}
+              <div
+                className="flex flex-col rounded-xl bg-white p-6 ring-1 ring-grey-900/10 sm:p-8"
+                data-testid="plan-free"
+              >
+                <h2 className="text-lg font-bold">Free</h2>
+                <p className="mt-3 flex items-baseline gap-2">
+                  <span className="text-[64px] leading-none font-extrabold tracking-[-0.03em]">$0</span>
+                  <span className="text-lg text-grey-500">no account needed</span>
+                </p>
+                <ul className="mt-6 space-y-3">
+                  {FREE_INCLUDES.map((item) => (
+                    <li key={item} className="flex items-start gap-3">
+                      <Check className="mt-0.5 size-5 shrink-0 text-green" aria-hidden />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-auto border-t border-grey-900/10 pt-6 max-lg:mt-8">
+                  <Button asChild variant="secondary" size="xl" full>
+                    <Link href="/local/new">Start drawing</Link>
+                  </Button>
+                  <p className="mt-4 text-center text-sm leading-relaxed text-grey-500">
+                    Drawings stay on this device, in this browser.{" "}
+                    <Link href="/local" className={cn(linkFocus, "font-bold text-grey-900 underline underline-offset-4")}>
+                      Your drawings here
+                    </Link>
+                  </p>
+                </div>
+              </div>
+
+              {/* The membership: what it adds, and the next step for whoever is looking */}
+              <div className="rounded-xl bg-grey-900 p-6 text-white sm:p-8" data-testid="plan-member">
+                <h2 className="text-lg font-bold">canvas membership</h2>
+                <p className="mt-3 flex items-baseline gap-2">
+                  <span className="text-[64px] leading-none font-extrabold tracking-[-0.03em]">{MEMBERSHIP.price}</span>
+                  <span className="text-lg text-grey-300">{MEMBERSHIP.per}</span>
+                </p>
+                <p className="mt-6 text-sm font-bold text-grey-300">Everything free, and</p>
+                <ul className="mt-3 space-y-3">
+                  {MEMBERSHIP_INCLUDES.map((item) => (
+                    <li key={item} className="flex items-start gap-3">
+                      <Check className="mt-0.5 size-5 shrink-0 text-cyan" aria-hidden />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-8 border-t border-white/10 pt-6">
+                  <Suspense fallback={<ActionsSkeleton />}>
+                    <PlanActions searchParams={searchParams} />
+                  </Suspense>
+                </div>
               </div>
             </div>
           </div>
@@ -313,7 +366,7 @@ export default function PricingPage({ searchParams }: PageProps<"/pricing">) {
         <section aria-labelledby="steps-title" className={cn(OUTER, "py-20 sm:py-24")}>
           <div className={INNER}>
             <h2 id="steps-title" className="mb-8 text-[30px] leading-tight font-bold tracking-[-0.02em] sm:text-[34px]">
-              From here to your first drawing
+              Getting the membership
             </h2>
             <Suspense fallback={<StepList done={0} />}>
               <Steps />

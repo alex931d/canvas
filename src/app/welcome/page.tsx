@@ -5,7 +5,7 @@ import Link from "next/link";
 import editorScreenshot from "@/components/landing/editor.webp";
 import { HeroDemo } from "@/components/landing/hero-demo";
 import { Button, Kbd } from "@/components/kit";
-import { MEMBERSHIP, MEMBERSHIP_INCLUDES } from "@/lib/billing/plan";
+import { FREE_INCLUDES, MEMBERSHIP, MEMBERSHIP_INCLUDES } from "@/lib/billing/plan";
 import { Reveal } from "@/components/motion/reveal";
 import { cn } from "@/lib/utils";
 import { SeasonalBoardDecor, SeasonalEffects } from "@/components/seasonal/site-decor";
@@ -29,7 +29,7 @@ import {
 export const metadata: Metadata = {
   title: "canvas: sketch it, paste it, check it",
   description:
-    `An infinite canvas for notes, math and chemistry. Write by hand or paste a screenshot, check each step with AI, work on it with classmates live and turn it into flashcards. Membership is ${MEMBERSHIP.price} ${MEMBERSHIP.per}.`,
+    `An infinite canvas for notes, math and chemistry, free in your browser with no account. The membership, ${MEMBERSHIP.price} ${MEMBERSHIP.per}, keeps your drawings in your account and adds AI math checks, chemistry tools, flashcards and drawing live with classmates.`,
 };
 
 const TOOLS = [
@@ -200,17 +200,15 @@ export default function WelcomePage() {
                 </p>
                 <div className="mt-9 flex flex-wrap items-center gap-3">
                   <Button asChild size="xl">
-                    <Link href="/signup">Create account</Link>
+                    <Link href="/local/new">Start drawing</Link>
                   </Button>
                   <Button asChild variant="secondary" size="xl">
-                    <Link href="/login">Log in</Link>
+                    <Link href="/pricing">See the membership</Link>
                   </Button>
                 </div>
-                <p className="mt-4 text-sm text-grey-500">
-                  {MEMBERSHIP.price} {MEMBERSHIP.per}. Cancel any time.{" "}
-                  <Link href="/pricing" className={cn(linkFocus, "font-bold text-grey-900 underline underline-offset-4")}>
-                    See what&apos;s included
-                  </Link>
+                <p className="mt-4 max-w-[30rem] text-sm leading-relaxed text-grey-500">
+                  Free, with no account: drawings save in your browser. Math checks, chemistry tools and drawing with
+                  classmates come with the membership, {MEMBERSHIP.price} {MEMBERSHIP.per}.
                 </p>
               </div>
 
@@ -358,52 +356,66 @@ export default function WelcomePage() {
           </div>
         </section>
 
-        {/* ------------------------------------------------------------ membership */}
+        {/* ------------------------------------------------------------ free, then the membership */}
         <section aria-labelledby="start-title" className="px-3 sm:px-6">
-          <Reveal className="mx-auto grid max-w-[1392px] gap-12 rounded-xl bg-grey-900 px-5 py-14 text-white sm:px-12 sm:py-16 lg:grid-cols-2 lg:items-center xl:px-16 xl:py-20">
+          <Reveal className="mx-auto grid max-w-[1392px] gap-12 rounded-xl bg-grey-900 px-5 py-14 text-white sm:px-12 sm:py-16 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:items-center xl:px-16 xl:py-20">
             <div>
               <h2
                 id="start-title"
                 className="text-[34px] leading-[1.1] font-bold tracking-[-0.02em] text-balance sm:text-[40px]"
               >
-                One membership, {MEMBERSHIP.price} {MEMBERSHIP.per}
+                Start free. Join when you want more.
               </h2>
               <p className="mt-4 max-w-[28rem] text-lg leading-relaxed text-grey-300">
-                Everything on this page is included. Get your membership, and your first drawing is one click away.
+                Every drawing tool is free, right in your browser. The membership keeps your drawings in your account
+                and adds the tools that check, quiz and share.
               </p>
               <div className="mt-9 flex flex-wrap items-center gap-3">
                 <Button asChild variant="light" size="xl">
-                  <Link href="/pricing">Get membership</Link>
+                  <Link href="/local/new">Start drawing</Link>
                 </Button>
                 <Link
-                  href="/login"
+                  href="/pricing"
                   className={cn(
                     linkFocus,
                     "px-3 py-2 text-sm font-bold underline underline-offset-4 hover:text-grey-300",
                   )}
                 >
-                  Log in
+                  Compare the plans
                 </Link>
               </div>
             </div>
 
-            <div className="rounded-xl bg-white/[0.06] p-6 ring-1 ring-white/10 sm:p-8">
-              <p className="flex items-baseline gap-2">
-                <span className="text-[56px] leading-none font-extrabold tracking-[-0.03em]">{MEMBERSHIP.price}</span>
-                <span className="text-lg text-grey-300">{MEMBERSHIP.per}</span>
-              </p>
-              <ul className="mt-6 space-y-3">
-                {MEMBERSHIP_INCLUDES.map((item) => (
-                  <li key={item} className="flex items-start gap-3">
-                    <Check className="mt-0.5 size-5 shrink-0 text-cyan" aria-hidden />
-                    {item}
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-6 text-sm leading-relaxed text-grey-300">
-                Billed monthly through Stripe, in US dollars. If you cancel, your drawings are kept for when you come
-                back.
-              </p>
+            <div className="grid gap-px overflow-hidden rounded-xl bg-white/10 ring-1 ring-white/10 sm:grid-cols-2">
+              <div className="bg-grey-900 p-6 sm:p-7">
+                <p className="flex items-baseline gap-2">
+                  <span className="text-[44px] leading-none font-extrabold tracking-[-0.03em]">Free</span>
+                </p>
+                <p className="mt-2 text-sm text-grey-300">No account needed</p>
+                <ul className="mt-6 space-y-3 text-[15px]">
+                  {FREE_INCLUDES.map((item) => (
+                    <li key={item} className="flex items-start gap-3">
+                      <Check className="mt-0.5 size-5 shrink-0 text-grey-300" aria-hidden />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="bg-white/[0.06] p-6 sm:p-7">
+                <p className="flex items-baseline gap-2">
+                  <span className="text-[44px] leading-none font-extrabold tracking-[-0.03em]">{MEMBERSHIP.price}</span>
+                  <span className="text-grey-300">{MEMBERSHIP.per}</span>
+                </p>
+                <p className="mt-2 text-sm text-grey-300">Everything free, and</p>
+                <ul className="mt-6 space-y-3 text-[15px]">
+                  {MEMBERSHIP_INCLUDES.map((item) => (
+                    <li key={item} className="flex items-start gap-3">
+                      <Check className="mt-0.5 size-5 shrink-0 text-cyan" aria-hidden />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
           </Reveal>
         </section>

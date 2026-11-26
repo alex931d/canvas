@@ -57,6 +57,7 @@ import type { HistoryAction } from "@/lib/collab/doc";
 import type { PeerDrafts } from "@/lib/collab/peer-drafts";
 import type { Peer } from "@/lib/collab/peers";
 import { subscribeMath, texSource, typesetMath } from "@/lib/math/layout";
+import type { MemberFeature } from "@/lib/billing/plan";
 import type { DrawEffect } from "@/lib/preferences";
 import { EquationEditor, type EquationValue } from "../equation-editor";
 import { GraphEditor } from "../graph-editor";
@@ -111,6 +112,8 @@ export function Board({
   images,
   imageVersion,
   onCheckMath,
+  mathCheckLocked = false,
+  onLocked,
   readOnly = false,
   drawEffect = "off",
   boardEffects = false,
@@ -136,6 +139,10 @@ export function Board({
   images: AssetCache | null;
   imageVersion: number;
   onCheckMath: (imageDataUrl: string) => Promise<MathCheck>;
+  /** Checking math is part of the membership and this person isn't a member: offer it instead. */
+  mathCheckLocked?: boolean;
+  /** They reached for something that's part of the membership. */
+  onLocked?: (feature: MemberFeature) => void;
   /** View-only: select, pan and lasso, nothing that changes the drawing. */
   readOnly?: boolean;
   /** How things arriving on the board animate (settings page); off when the device asks for less motion. */
@@ -792,6 +799,7 @@ export function Board({
 
   /** Check whatever is selected (lasso region or selected items). */
   const checkSelection = () => {
+    if (mathCheckLocked) return void onLocked?.("math-check");
     if (lassoRegion && lassoRegion.length > 2) {
       const b = polygonBounds(lassoRegion);
       if (b) return void runCheck(padRect(b, 8), lassoRegion);
@@ -893,7 +901,8 @@ export function Board({
     insertTraced,
     insertMath,
     startMathCheck: () => {
-      if (selected.length > 0 || (lassoRegion && lassoRegion.length > 2)) checkSelection();
+      if (mathCheckLocked) onLocked?.("math-check");
+      else if (selected.length > 0 || (lassoRegion && lassoRegion.length > 2)) checkSelection();
       else {
         checkAfterLassoRef.current = true;
         setTool("lasso");
@@ -1674,6 +1683,7 @@ export function Board({
           readOnly={readOnly}
           images={images}
           onCheck={checkSelection}
+          checkLocked={mathCheckLocked}
           onFlashcard={onMakeFlashcard ? () => void makeFlashcard() : undefined}
           onPresent={onPresentFrame}
           onRenameFrame={onOpenFrame}

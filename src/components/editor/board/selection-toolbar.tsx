@@ -1,6 +1,6 @@
 "use client";
 
-import { Columns3, Copy, GalleryVerticalEnd, Pencil, Play, Sparkles, Trash2 } from "lucide-react";
+import { Columns3, Copy, GalleryVerticalEnd, Lock, Pencil, Play, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/kit";
 import type { AssetCache } from "@/lib/canvas/images";
 import type { CanvasElement, KanbanElement } from "@/lib/canvas/schema";
@@ -19,6 +19,7 @@ export function SelectionToolbar({
   readOnly,
   images,
   onCheck,
+  checkLocked = false,
   onFlashcard,
   onPresent,
   onRenameFrame,
@@ -35,6 +36,8 @@ export function SelectionToolbar({
   readOnly: boolean;
   images: AssetCache | null;
   onCheck: () => void;
+  /** Part of the membership, which this person doesn't have: Check math offers it. */
+  checkLocked?: boolean;
   onFlashcard?: () => void;
   onPresent?: (frameId: string) => void;
   onRenameFrame?: (frameId: string) => void;
@@ -55,8 +58,9 @@ export function SelectionToolbar({
       style={position}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      <Button size="sm" className="bg-green hover:bg-green/90" onClick={onCheck}>
+      <Button size="sm" className="bg-green hover:bg-green/90" onClick={onCheck} data-locked={checkLocked || undefined}>
         <Sparkles /> Check math
+        {checkLocked ? <Lock className="size-3.5 opacity-80" aria-label="Members" /> : null}
       </Button>
       {onFlashcard ? (
         <Button size="sm" variant="ghost" onClick={onFlashcard} title="Make a flashcard from this">

@@ -29,7 +29,8 @@ export function FlashcardDialog({
   onClose,
 }: {
   capture: FlashcardCapture | null;
-  drawingId: string;
+  /** The drawing on the server, if it's there (a drawing kept in this browser isn't). */
+  drawingId: string | null;
   deck: string;
   onClose: () => void;
 }) {
@@ -61,7 +62,7 @@ function Form({
   onClose,
 }: {
   capture: FlashcardCapture;
-  drawingId: string;
+  drawingId: string | null;
   deck: string;
   onClose: () => void;
 }) {
@@ -88,7 +89,8 @@ function Form({
     const form = new FormData();
     form.set("front", front.trim());
     form.set("back", back.trim());
-    form.set("drawingId", drawingId);
+    if (drawingId) form.set("drawingId", drawingId);
+    else form.set("deck", deck);
     if (side !== "none") {
       form.set("imageSide", side);
       form.set("width", String(capture.width));

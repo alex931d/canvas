@@ -65,6 +65,11 @@ const path = (p = page) => new URL(p.url()).pathname;
 /** Redirects inside streamed pages happen in the browser: wait for them to land. */
 const landsOn = (p, pathname, timeout = 10_000) =>
   waitFor(async () => path(p) === pathname && !!(await p.$("h1")), timeout);
+/** Home without a membership: the free plan, with the way to the membership. */
+const onFreePlan = async (p = page, says = /./) =>
+  !!(await p.waitForSelector("[data-testid=free-plan] a[href='/pricing']", { timeout: 10_000 }).catch(() => null)) &&
+  path(p) === "/" &&
+  says.test(await p.$eval("[data-testid=free-plan]", (s) => s.innerText));
 const currentStep = (p = page) =>
   p.$eval("li[aria-current=step]", (li) => li.innerText.split("\n")[1] ?? li.innerText).catch(() => "");
 
@@ -76,8 +81,11 @@ await visitor.goto(BASE, { waitUntil: "networkidle0" });
 await clickAndWait(visitor, "header a[href='/pricing']");
 const visitorText = await text(visitor);
 check(
-  "Pricing on the landing page opens /pricing with the plan",
-  path(visitor) === "/pricing" && /\$5\s*a month/.test(visitorText) && /Live drawing with other members/.test(visitorText),
+  "Pricing on the landing page opens /pricing with both plans",
+  path(visitor) === "/pricing" &&
+    /\$5\s*a month/.test(visitorText) &&
+    /Drawing live with others/.test(visitorText) &&
+    /\$0\s*no account needed/.test(visitorText),
 );
 check(
   "visitors are asked to create an account, or log in and come back",
@@ -86,8 +94,8 @@ check(
 );
 check("and the first step is marked as next", (await currentStep(visitor)) === "Create an account", await currentStep(visitor));
 await visitor.goto(`${BASE}/welcome`, { waitUntil: "networkidle0" });
-await clickAndWait(visitor, "xpath/.//a[normalize-space()='Get membership']");
-check("Get membership on the landing page leads there too", path(visitor) === "/pricing");
+await clickAndWait(visitor, "xpath/.//a[normalize-space()='See the membership']");
+check("See the membership on the landing page leads there too", path(visitor) === "/pricing");
 await visitor.browserContext().close();
 
 // ------------------------------------------------------------ a new account isn't a member yet
@@ -116,7 +124,8 @@ check(
 );
 check("and marks starting the membership as next", (await currentStep()) === "Start your membership", await currentStep());
 await page.goto(BASE, { waitUntil: "networkidle0" });
-check("the drawings send non-members to /pricing", !!(await landsOn(page, "/pricing")), path());
+await page.waitForSelector("[data-testid=free-plan]", { timeout: 10_000 }).catch(() => null);
+check("non-members' home is the free plan, with the way to the membership", path() === "/" && !!(await page.$("[data-testid=free-plan] a[href='/pricing']")), path());
 await page.goto(`${BASE}/membership`, { waitUntil: "networkidle0" });
 check("so does /membership, which is for members", !!(await landsOn(page, "/pricing")), path());
 const mathStatus = await page.evaluate(() =>
@@ -259,7 +268,7 @@ check(
   await status(),
 );
 await page.goto(BASE, { waitUntil: "networkidle0" });
-check("the gallery sends them to renew", !!(await landsOn(page, "/pricing")), path());
+check("home says the membership ended, and offers to renew", await onFreePlan(page, /membership has ended[\s\S]*drawing in your account is kept safe/), path());
 check("their drawings are kept", Number(sql(`select count(*) from drawings where user_id = '${me.id}'`)) === 1);
 
 // ------------------------------------------------------------ renewing
@@ -289,7 +298,7 @@ await page.goto(BASE, { waitUntil: "networkidle0" });
 check("while Stripe retries, they keep access", (await h1()) === "Drawings");
 await setStatus({ status: "unpaid" });
 await page.goto(BASE, { waitUntil: "networkidle0" });
-check("once Stripe gives up, access stops", !!(await landsOn(page, "/pricing")), path());
+check("once Stripe gives up, the membership stops", await onFreePlan(page, /membership has ended/), path());
 
 // ------------------------------------------------------------ webhook security
 const signer = new Stripe("sk_test_mock");
@@ -347,7 +356,7 @@ check(
 check("show lists it", /active\s+complimentary/.test(run("show", comp.email)));
 run("revoke", comp.email);
 await pc.goto(BASE, { waitUntil: "networkidle0" });
-check("revoke ends it", !!(await landsOn(pc, "/pricing")), path(pc));
+check("revoke ends it", await onFreePlan(pc), path(pc));
 await ctxC.close();
 
 console.log("\nproblems:", problems.length ? problems : "none");

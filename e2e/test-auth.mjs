@@ -65,8 +65,11 @@ check(
   new URL(page.url()).pathname,
 );
 await page.goto(BASE, { waitUntil: "networkidle0" });
-await page.waitForFunction(() => location.pathname === "/pricing", { timeout: 10_000 }).catch(() => {});
-check("the drawings need a membership", new URL(page.url()).pathname === "/pricing");
+await page.waitForSelector("[data-testid=free-plan]", { timeout: 10_000 }).catch(() => {});
+check(
+  "without a membership, home is the free plan (drawings in this browser)",
+  new URL(page.url()).pathname === "/" && !!(await page.$("[data-testid=free-plan] a[href='/pricing']")),
+);
 grantMembership(a.id);
 await page.goto(BASE, { waitUntil: "networkidle0" });
 check("members get the gallery", (await page.$eval("h1", (h) => h.textContent)) === "Drawings");

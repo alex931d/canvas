@@ -5,7 +5,8 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 import { db } from "@/db";
 import { subscriptions, type Subscription } from "@/db/schema";
-import { requireUser, type SessionUser } from "@/lib/auth/session";
+import { getCurrentSession, requireUser, type SessionUser } from "@/lib/auth/session";
+import type { Plan } from "./plan";
 
 /**
  * Subscription statuses that keep someone a member. `past_due` means Stripe
@@ -54,4 +55,14 @@ export async function requireMember(): Promise<SessionUser> {
 export async function membershipRequiredResponse(userId: string, what: string): Promise<Response | null> {
   if ((await getMembership(userId)).isMember) return null;
   return Response.json({ error: `${what} are part of the membership.` }, { status: 402 });
+}
+
+/**
+ * Who's looking and what they can use, for pages anyone can open (the free
+ * plan's pages need no account): null and "free" when signed out.
+ */
+export async function getViewerPlan(): Promise<{ user: SessionUser | null; plan: Plan }> {
+  const { user } = await getCurrentSession();
+  if (!user) return { user: null, plan: "free" };
+  return { user, plan: (await getMembership(user.id)).isMember ? "member" : "free" };
 }

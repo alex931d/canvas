@@ -11,6 +11,7 @@ export function DrawingCard({
   chip,
   accent = "bg-green",
   menu,
+  href = `/drawings/${id}`,
 }: {
   /** Place in the grid: cards in a row come in one after another. */
   index: number;
@@ -22,10 +23,12 @@ export function DrawingCard({
   accent?: string;
   /** The ⋯ menu (DrawingMenu), placed at the bottom right. */
   menu: React.ReactNode;
+  /** Where it opens: the drawing on the server unless it's kept in this browser. */
+  href?: string;
 }) {
   return (
     <Reveal as="li" delay={(index % 3) * 0.05} className="group relative">
-      <Link href={`/drawings/${id}`} className="block rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <Link href={href} className="block rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <span className="relative block aspect-[16/10] overflow-hidden rounded-lg bg-beige-100 ring-1 ring-black/5 transition-shadow group-hover:ring-2 group-hover:ring-green/50">
           {thumbnail ? (
             // Small data URLs stored in Postgres; next/image adds nothing here.
