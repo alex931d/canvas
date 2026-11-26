@@ -1,8 +1,9 @@
-import { normalizePresentation, type Presentation } from "@/lib/canvas/schema";
+import { normalizePresentation, type CanvasElement, type Presentation } from "@/lib/canvas/schema";
 import type { AssetCache } from "@/lib/canvas/images";
 import type { Role } from "./access-types";
 import type { CollabDoc } from "./doc";
 import { assetIdsIn, type DocOp } from "./ops";
+import { DraftOutbox, type DraftPiece } from "./peer-drafts";
 
 /**
  * Keeps one browser tab and the server in step for one drawing:
@@ -39,6 +40,8 @@ export type PresenceMessage = {
   a?: string | null;
   cur: { x: number; y: number } | null;
   sel: string[];
+  /** What they're drawing right now: a new piece, or null when they lifted the pointer (see peer-drafts.ts). */
+  dr?: DraftPiece | null;
   hello?: boolean;
   bye?: boolean;
 };
@@ -109,6 +112,11 @@ export class DrawingSync {
   private replyTimer: ReturnType<typeof setTimeout> | null = null;
   private lastPresenceAt = 0;
   private lastPresenceKey = "";
+  /** This tab's stroke or shape in progress, sent a piece at a time with the presence. */
+  private readonly outbox = new DraftOutbox();
+  /** A presence update is on its way: the next waits for it, so pieces arrive in order. */
+  private presenceBusy = false;
+  private presenceAgain = false;
   /** Other people's tabs on this drawing → when we last heard from each. */
   private peers = new Map<string, number>();
 
@@ -473,7 +481,17 @@ export class DrawingSync {
       cursor: cursor ? { x: Math.round(cursor.x * 10) / 10, y: Math.round(cursor.y * 10) / 10 } : null,
       selection: selection.slice(0, 50),
     };
-    // Alone: remember it for when someone arrives, send nothing.
+    this.schedulePresence();
+  }
+
+  /** The stroke or shape this tab is drawing (changed in place as it grows), or null when it ends. */
+  setDraft(draft: CanvasElement | null) {
+    this.outbox.set(draft);
+    this.schedulePresence();
+  }
+
+  /** Send soon, no more often than every PRESENCE_INTERVAL_MS. Alone: remember it for when someone arrives. */
+  private schedulePresence() {
     if (this.presenceTimer || !this.hasCompany) return;
     const wait = Math.max(0, this.lastPresenceAt + PRESENCE_INTERVAL_MS - Date.now());
     this.presenceTimer = setTimeout(() => {
@@ -521,20 +539,33 @@ export class DrawingSync {
    */
   private async sendPresence(kind: "move" | "hello" | "always") {
     if (this.stopped || this.ended || this.connection !== "live") return;
+    // One at a time, so pieces of a stroke arrive in order; whatever changed meanwhile goes next.
+    if (this.presenceBusy) {
+      this.presenceAgain = true;
+      return;
+    }
     const body = { clientId: this.opts.clientId, cursor: this.presenceState.cursor, selection: this.presenceState.selection };
     const key = JSON.stringify(body);
-    if (kind === "move" && (!this.hasCompany || key === this.lastPresenceKey)) return;
+    const draft = this.hasCompany ? this.outbox.take() : undefined;
+    if (kind === "move" && draft === undefined && (!this.hasCompany || key === this.lastPresenceKey)) return;
     this.lastPresenceKey = key;
     this.lastPresenceAt = Date.now();
+    this.presenceBusy = true;
     try {
       await fetch(`/api/drawings/${this.opts.drawingId}/presence`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(kind === "hello" ? { ...body, hello: true } : body),
+        body: JSON.stringify({ ...body, ...(draft !== undefined ? { draft } : {}), ...(kind === "hello" ? { hello: true } : {}) }),
         keepalive: true,
       });
     } catch {
-      /* cursors are best effort */
+      /* cursors and strokes in progress are best effort: the finished stroke comes with the changes */
+    } finally {
+      this.presenceBusy = false;
+      if (this.presenceAgain || this.outbox.pending) {
+        this.presenceAgain = false;
+        this.schedulePresence();
+      }
     }
   }
 }

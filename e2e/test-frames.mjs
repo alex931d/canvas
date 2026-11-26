@@ -97,7 +97,7 @@ await page.waitForFunction(() => /^\/drawings\/[0-9a-f-]{36}$/.test(location.pat
 const id = page.url().split("/drawings/")[1];
 await synced(page);
 
-check("the sidebar has the Frame tool", (await page.$("aside button[aria-label^='Frame']")) !== null);
+check("the dock has the Frame tool", (await page.$("[data-testid=tool-dock] [data-items*='Frame']")) !== null);
 
 // Something to show: a squiggle and a box on the left, a circle on the right.
 await page.keyboard.press("p");
@@ -122,7 +122,7 @@ check("dragging makes a frame", fs.length === 1);
 const f1 = fs[0];
 check("named and numbered as the first slide", f1?.title === "Slide 1" && f1?.order === 1, JSON.stringify(f1));
 check("in 16:9, around everything dragged over", Math.abs(f1.w / f1.h - 16 / 9) < 0.01 && f1.h >= 329 && f1.w >= 329, `${f1.w}×${f1.h}`);
-check("then it's selected, with the select tool back", await page.$eval("aside button[aria-label^='Select']", (b) => b.getAttribute("aria-pressed") === "true"));
+check("then it's selected, with the select tool back", await page.$eval("[data-testid=tool-dock] button[data-tool='Select']", (b) => b.getAttribute("aria-pressed") === "true"));
 check("and offers Present", (await page.$$("xpath/.//*[@role='toolbar'][@aria-label='Selection']//button[normalize-space()='Present']")).length === 1);
 
 // A click with the tool: a frame the size of most of the view, numbered next.
@@ -360,7 +360,7 @@ const viewer = await signUp(viewerPage, { name: "Frame Viewer" });
 sql(`insert into drawing_members (drawing_id, user_id, role) values ('${id}', '${viewer.id}', 'viewer')`);
 await viewerPage.goto(`${BASE}/drawings/${id}`, { waitUntil: "load" });
 await synced(viewerPage);
-check("view-only members don't get the Frame tool", (await viewerPage.$("aside button[aria-label^='Frame']")) === null);
+check("view-only members don't get the Frame tool", (await viewerPage.$("[data-testid=tool-dock] [data-items*='Frame']")) === null);
 await openSlides(viewerPage);
 check(
   "they see the slides but can't change them",

@@ -174,14 +174,11 @@ try {
   await adminPage.click("main form button[type=submit]");
   await adminPage.waitForSelector("[data-testid=board]", { timeout: 15_000 });
   await sleep(800);
-  const editorMenu = await adminPage.evaluate(() => {
-    const aside = [...document.querySelectorAll("aside")].find((a) => a.checkVisibility());
-    return {
-      art: aside?.querySelectorAll("[data-season-decor] svg").length ?? 0,
-      moving: aside?.querySelectorAll("canvas[data-particles-kind], .season-bat").length ?? -1,
-    };
-  });
-  check("in the editor the menu keeps its candy canes, but no snow falls", editorMenu.art >= 1 && editorMenu.moving === 0, JSON.stringify(editorMenu));
+  const editorMenu = await adminPage.evaluate(() => ({
+    menu: [...document.querySelectorAll("aside")].some((a) => a.checkVisibility()),
+    moving: [...document.querySelectorAll("canvas[data-particles-kind], .season-bat")].filter((n) => n.checkVisibility()).length,
+  }));
+  check("the editor has no menu, so nothing seasonal falls next to the drawing", !editorMenu.menu && editorMenu.moving === 0, JSON.stringify(editorMenu));
 
   // Hiding them from the account menu.
   await adminPage.goto(BASE, { waitUntil: "networkidle0" });

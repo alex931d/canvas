@@ -9,7 +9,7 @@ import puppeteer from "puppeteer-core";
 import nextEnv from "@next/env";
 
 nextEnv.loadEnvConfig(process.cwd());
-const { signUp, sql, sleep } = await import("./helpers.mjs");
+const { signUp, sql, sleep, pickTool } = await import("./helpers.mjs");
 const SECOND = process.env.SECOND_URL ?? "http://localhost:3001";
 const CHROME = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 
@@ -45,7 +45,7 @@ const items = (p) =>
 const status = (p) => p.$eval("[data-testid=storage-status]", (el) => el.innerText.replace(/\s+/g, " ")).catch(() => "");
 const synced = (p) => waitFor(async () => /Saved here.*Synced/.test(await status(p)), 10_000);
 const peers = (p) => p.$eval("[data-testid=peers]", (e) => e.getAttribute("aria-label")).catch(() => "");
-const tool = (p, label) => p.click(`aside button[aria-label='${label}']`);
+const tool = (p, label) => pickTool(p, label);
 async function drag(p, pts) {
   const r = await p.$eval("[data-testid=board]", (el) => {
     const b = el.getBoundingClientRect();

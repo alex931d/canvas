@@ -20,7 +20,7 @@ export function ZoomControls({
 }) {
   return (
     <div
-      className="absolute right-3 bottom-3 z-20 flex items-center gap-0.5 rounded-xl border bg-card p-1 shadow-float"
+      className="absolute right-3 bottom-[68px] z-20 flex items-center gap-0.5 rounded-xl border bg-card p-1 shadow-float lg:bottom-3"
       onPointerDown={(e) => e.stopPropagation()}
     >
       <Tip content="Zoom out" shortcut="Ctrl −">

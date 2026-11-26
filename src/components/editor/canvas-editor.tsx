@@ -9,7 +9,7 @@ import {
   FileImage,
   FileUp,
   FlaskConical,
-  ImagePlus,
+  Play,
   Presentation as PresentationIcon,
   Redo2,
   Share2,
@@ -30,10 +30,9 @@ import {
   useSyncExternalStore,
 } from "react";
 import { renameDrawing, savePresentation } from "@/app/actions";
-import { AppSidebar, SidebarButton, SidebarSeparator } from "@/components/app-sidebar";
 import { StudyBuddies } from "@/components/buddy/study-buddies";
 import { Badge, Button, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Tip, toast } from "@/components/kit";
-import { SidebarUserMenu, type MenuUser } from "@/components/user-menu";
+import { HeaderUserMenu, type MenuUser } from "@/components/user-menu";
 import { emitBuddy } from "@/lib/buddy/events";
 import { finishedCards } from "@/lib/canvas/kanban";
 import { mathCheckSchema, type MathCheck } from "@/lib/ai/math-check-schema";
@@ -45,6 +44,7 @@ import {
   assetIdsOf,
   drawingDataSchema,
   isAssetElement,
+  type CanvasElement,
   type DrawingData,
   type FrameElement,
   type Presentation,
@@ -52,6 +52,7 @@ import {
 import type { Role } from "@/lib/collab/access-types";
 import { CollabDoc, type HistoryAction } from "@/lib/collab/doc";
 import { peerColor, type Peer } from "@/lib/collab/peers";
+import { PeerDrafts } from "@/lib/collab/peer-drafts";
 import { DrawingSync, type PresenceMessage, type SyncStatus } from "@/lib/collab/sync-client";
 import { LocalDrawingStore, type LocalStatus } from "@/lib/local-store/store";
 import { DEFAULT_PREFERENCES, type Preferences } from "@/lib/preferences";
@@ -65,7 +66,9 @@ import { ShareDialog } from "./share-dialog";
 import { SlidesPanel } from "./slides-panel";
 import { StoragePopover, type ServerState } from "./storage-panel";
 import { StyleBar } from "./style-bar";
-import { DEFAULT_STYLE, IMAGE_ACTION, MEDIA_ACCEPT, TOOLS, TRACE_ACTION, VIEW_TOOLS, type Style, type Tool } from "./tools";
+import { ToolDock } from "./tool-dock";
+import { ToolSearch, type SearchItem } from "./tool-search";
+import { DEFAULT_STYLE, MEDIA_ACCEPT, ToolRegistry, type ActionId, type Style, type Tool } from "./tools";
 import { TracePictureDialog } from "./trace-picture-dialog";
 
 function fileSafe(name: string) {
@@ -170,7 +173,7 @@ export function CanvasEditor({
   const readOnly = role === "viewer" || ended !== null;
 
   const [toolChoice, setTool] = useState<Tool>(initialRole === "viewer" ? "select" : "pen");
-  const tool: Tool = readOnly && !VIEW_TOOLS.includes(toolChoice) ? "select" : toolChoice;
+  const tool: Tool = ToolRegistry.shared.allowed(toolChoice, readOnly) ? toolChoice : "select";
   const [style, setStyle] = useState<Style>(DEFAULT_STYLE);
 
   const [title, setTitle] = useState(initialTitle);
@@ -189,10 +192,13 @@ export function CanvasEditor({
   const readOnlyRef = useRef(readOnly);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(INITIAL_STATUS);
   const [peers, setPeers] = useState<Peer[]>([]);
+  /** What other people are drawing right now, put together from their presence. */
+  const [peerDrafts] = useState(() => new PeerDrafts());
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
   const selectionRef = useRef<string[]>([]);
   const [panelMessage, setPanelMessage] = useState<string | null>(null);
   const [chemOpen, setChemOpenState] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [slidesOpen, setSlidesOpenState] = useState(false);
   /** A frame to show in the slides panel (its title was double-clicked). */
   const [slideFocus, setSlideFocus] = useState<string | null>(null);
@@ -254,6 +260,8 @@ export function CanvasEditor({
 
   const onPresence = useEffectEvent((p: PresenceMessage) => {
     if (p.u === user.id) return; // your own other tabs
+    if (p.bye) peerDrafts.forget(p.c);
+    else peerDrafts.apply(p.c, p.dr);
     setPeers((prev) => {
       if (p.bye) return prev.filter((x) => x.clientId !== p.c);
       const next: Peer = {
@@ -414,6 +422,14 @@ export function CanvasEditor({
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, []);
 
+  // Toasts rise above the tool dock while the editor is open.
+  useEffect(() => {
+    document.documentElement.dataset.dock = "";
+    return () => {
+      delete document.documentElement.dataset.dock;
+    };
+  }, []);
+
   // Undo / redo / save shortcuts (tool and selection keys live in the board).
   const onKeyDown = useEffectEvent((e: KeyboardEvent) => {
     const mod = e.metaKey || e.ctrlKey;
@@ -425,6 +441,12 @@ export function CanvasEditor({
     }
     const target = e.target as HTMLElement | null;
     if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+    // Find a tool by name: / or ⌘K.
+    if ((e.key === "/" && !mod) || (mod && key === "k")) {
+      e.preventDefault();
+      setSearchOpen(true);
+      return;
+    }
     if (!ready || !mod || readOnly) return;
     if (key === "z") {
       e.preventDefault();
@@ -439,6 +461,9 @@ export function CanvasEditor({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  // What this tab is drawing, piece by piece, for the others to see as it grows.
+  const onDraft = useCallback((draft: CanvasElement | null) => syncRef.current?.setDraft(draft), []);
 
   // Presence: where this tab's pointer is and what it has selected.
   const onPointerWorld = useCallback((p: { x: number; y: number } | null) => {
@@ -505,6 +530,49 @@ export function CanvasEditor({
     if (!slides.length) return;
     setPresenting({ startId });
   }
+
+  /** Image or video, or Trace a picture: both start with picking a file. */
+  function runAction(action: ActionId) {
+    if (readOnly || !ready) return;
+    if (action === "media") imageInputRef.current?.click();
+    else traceInputRef.current?.click();
+  }
+
+  // Everything the tool search finds: the tools this person can use, then commands.
+  const registry = ToolRegistry.shared;
+  const searchItems: SearchItem[] = [
+    ...registry.tools
+      .filter((t) => registry.allowed(t.id, readOnly))
+      .map((t) => ({ id: t.id, label: t.label, hint: t.hint, words: t.words, shortcut: t.key, Icon: t.Icon, run: () => setTool(t.id) })),
+    ...(readOnly
+      ? []
+      : registry.actions.map((a) => ({ id: a.id, label: a.label, hint: a.hint, words: a.words, shortcut: a.key, Icon: a.Icon, run: () => runAction(a.id) }))),
+    ...(readOnly
+      ? []
+      : [
+          { id: "undo", label: "Undo", shortcut: "⌘Z", Icon: Undo2, run: () => doc.dispatch({ type: "undo" }) },
+          { id: "redo", label: "Redo", shortcut: "⇧⌘Z", Icon: Redo2, run: () => doc.dispatch({ type: "redo" }) },
+        ]),
+    {
+      id: "check",
+      label: "Check math",
+      hint: "Loop around an equation and the AI checks each step",
+      words: "ai verify answer",
+      Icon: Sparkles,
+      run: () => boardRef.current?.startMathCheck(),
+    },
+    { id: "slides", label: "Slides", hint: "Frames as slides: order, style, present", words: "presentation frames", Icon: PresentationIcon, run: () => setSlidesOpen(true) },
+    ...(slides.length
+      ? [{ id: "present", label: "Present", hint: "Show the slides full screen", words: "slideshow presentation", Icon: Play, run: () => present(null) }]
+      : []),
+    { id: "chemistry", label: "Chemistry", hint: "Molar mass, balancing, the periodic table", words: "chem elements molar", Icon: FlaskConical, run: () => setChemOpen(true) },
+    { id: "share", label: "Share", hint: "Invite people to draw with you, live", words: "invite collaborate link", Icon: Share2, run: () => setShareOpen(true) },
+    { id: "export", label: "Export PNG", hint: "A picture of the whole drawing", words: "download image save", Icon: FileImage, run: exportPng },
+    { id: "backup", label: "Download backup", hint: "The drawing as a .json file", words: "save export json", Icon: FileDown, run: () => void downloadBackup() },
+    ...(readOnly
+      ? []
+      : [{ id: "clear", label: "Clear board", hint: "Remove everything (undo brings it back)", words: "delete all empty", Icon: Trash2, run: () => doc.dispatch({ type: "clear" }) }]),
+  ];
 
   function exportPng() {
     const region = exportRegion(elements, 48);
@@ -626,70 +694,12 @@ export function CanvasEditor({
               ? { text: localStatus.notice, action: "Download backup", onAction: downloadBackup }
               : null;
 
-  const tools = readOnly ? TOOLS.filter((t) => VIEW_TOOLS.includes(t.id)) : TOOLS;
-
   return (
-    <div className="flex min-h-dvh flex-col md:flex-row">
-      <AppSidebar footer={<SidebarUserMenu user={user} />} seasonalMotion={false}>
-        {tools.map((t) => (
-          <SidebarButton
-            key={t.id}
-            compact
-            icon={<t.Icon />}
-            label={t.label}
-            shortcut={t.key}
-            active={tool === t.id}
-            pressed={tool === t.id}
-            onClick={() => setTool(t.id)}
-          />
-        ))}
-        {readOnly ? null : (
-          <>
-            <SidebarButton
-              compact
-              icon={<ImagePlus />}
-              label={IMAGE_ACTION.label}
-              shortcut={IMAGE_ACTION.key}
-              onClick={() => imageInputRef.current?.click()}
-            />
-            <SidebarButton
-              compact
-              icon={<TRACE_ACTION.Icon />}
-              label={TRACE_ACTION.label}
-              shortcut={TRACE_ACTION.key}
-              disabled={!ready}
-              onClick={() => traceInputRef.current?.click()}
-            />
-            <SidebarSeparator />
-            <SidebarButton
-              compact
-              icon={<Undo2 />}
-              label="Undo"
-              disabled={!ready || !snap.canUndo}
-              onClick={() => doc.dispatch({ type: "undo" })}
-            />
-            <SidebarButton
-              compact
-              icon={<Redo2 />}
-              label="Redo"
-              disabled={!ready || !snap.canRedo}
-              onClick={() => doc.dispatch({ type: "redo" })}
-            />
-            <SidebarButton
-              compact
-              icon={<Trash2 />}
-              label="Clear board"
-              disabled={!ready || elements.length === 0}
-              onClick={() => doc.dispatch({ type: "clear" })}
-            />
-          </>
-        )}
-      </AppSidebar>
+    <div className="flex min-h-dvh flex-col">
       <StudyBuddies />
-
-      <main className="flex h-dvh min-w-0 flex-1 flex-col gap-4 px-3 pt-3 pb-[76px] md:px-8 md:pt-6 md:pb-6">
+      <main className="flex h-dvh min-w-0 flex-1 flex-col gap-3 p-3 md:gap-4 md:px-6 md:pt-5 md:pb-5">
         <header className="flex items-center gap-2 md:gap-3">
-          <Button asChild variant="ghost" size="icon-md" className="md:hidden" aria-label="All drawings">
+          <Button asChild variant="ghost" size="icon-md" aria-label="All drawings">
             <Link href="/">
               <ArrowLeft />
             </Link>
@@ -839,6 +849,8 @@ export function CanvasEditor({
               <Sparkles /> <span className="max-sm:hidden">Check math</span>
             </Button>
           </Tip>
+
+          <HeaderUserMenu user={user} />
         </header>
 
         {banner ? (
@@ -881,8 +893,22 @@ export function CanvasEditor({
               setSlideFocus(frameId);
             }}
             onPresentFrame={present}
+            onDraft={onDraft}
+            peerDrafts={peerDrafts}
           />
           {readOnly ? null : <StyleBar tool={tool} style={style} onChange={updateStyle} />}
+          <ToolDock
+            tool={tool}
+            onTool={setTool}
+            onAction={runAction}
+            readOnly={readOnly}
+            disabled={!ready}
+            canUndo={snap.canUndo}
+            canRedo={snap.canRedo}
+            onUndo={() => doc.dispatch({ type: "undo" })}
+            onRedo={() => doc.dispatch({ type: "redo" })}
+            onSearch={() => setSearchOpen(true)}
+          />
         </div>
       </main>
 
@@ -899,6 +925,8 @@ export function CanvasEditor({
           }
         }}
       />
+
+      <ToolSearch open={searchOpen} onOpenChange={setSearchOpen} items={searchItems} />
 
       <SlidesPanel
         open={slidesOpen}

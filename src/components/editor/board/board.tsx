@@ -1,13 +1,12 @@
 "use client";
 
-import { Columns3, Copy, GalleryVerticalEnd, Pencil, Play, Sparkles, Trash2 } from "lucide-react";
-import { Button, toast } from "@/components/kit";
 import {
   useCallback,
   useEffect,
   useEffectEvent,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type Dispatch,
@@ -19,45 +18,33 @@ import {
   elementBox,
   hitTest,
   hitTestAll,
-  insideFrame,
   insidePolygon,
-  measureText,
   padRect,
-  pointInRect,
   polygonBounds,
   rectContainsRect,
   rectFromPoints,
   rectsIntersect,
   resetTextMetrics,
   scaleElement,
-  slidesOf,
   translateElement,
   unionRects,
   type Point,
   type Rect,
 } from "@/lib/canvas/geometry";
-import { AssetError, fileType, inspectGif, type AssetCache } from "@/lib/canvas/images";
+import type { AssetCache } from "@/lib/canvas/images";
 import {
   addColumn,
-  dropSlot,
   findCard,
   kanbanLayout,
   kanbanPartAt,
-  moveCard,
-  newKanban,
-  withoutCard,
   type KanbanPart,
 } from "@/lib/canvas/kanban";
-import { drawCard } from "@/lib/canvas/kanban-render";
 import { useReducedMotion } from "motion/react";
 import { ElementEffects } from "@/lib/canvas/effects";
 import { KanbanEffects } from "@/lib/canvas/kanban-fx";
-import { drawElement, drawElementFx, drawScene, frameLabelRect, renderRegion, type RenderEnv } from "@/lib/canvas/render";
+import type { RenderEnv } from "@/lib/canvas/render";
 import {
-  FONT_FAMILIES,
   TEXT_LINE_HEIGHT,
-  isVideoType,
-  type AssetElement,
   type CanvasElement,
   type FrameElement,
   type GraphElement,
@@ -67,118 +54,49 @@ import {
 } from "@/lib/canvas/schema";
 import type { MathCheck } from "@/lib/ai/math-check-schema";
 import type { HistoryAction } from "@/lib/collab/doc";
+import type { PeerDrafts } from "@/lib/collab/peer-drafts";
 import type { Peer } from "@/lib/collab/peers";
 import { subscribeMath, texSource, typesetMath } from "@/lib/math/layout";
 import type { DrawEffect } from "@/lib/preferences";
 import { publishScene, publishView } from "@/lib/canvas/view-bus";
-import { EquationEditor, type EquationValue } from "./equation-editor";
-import { GRAPH_COLORS, GraphEditor } from "./graph-editor";
-import { KanbanEditor, type KanbanEdit, type KanbanEditorHandle } from "./kanban-editor";
-import { MathCard, type MathState } from "./math-card";
-import { MediaControls } from "./media-controls";
-import { FRAME_ASPECTS, MEDIA_ACCEPT, TOOLS, TRACE_ACTION, VIEW_TOOLS, type Style, type Tool } from "./tools";
-import { ZoomControls } from "./zoom-controls";
-
-// ------------------------------------------------------------------ types
-
-/** screen = (world - {x, y}) * z */
-export type Camera = { x: number; y: number; z: number };
-
-/** Part of the canvas captured for a flashcard. */
-export type FlashcardCapture = {
-  blob: Blob;
-  width: number;
-  height: number;
-  /** Text and equation sources in the selection, to prefill the card. */
-  text: string;
-};
-
-/** Strokes traced from part of a picture (src/lib/canvas/trace.ts), in the traced pixels. */
-export type TracedPicture = {
-  strokes: { points: number[]; size: number }[];
-  /** The traced pixels' size. */
-  width: number;
-  height: number;
-  /** How big that part of the picture is, in the picture's own pixels (sets the size on the board). */
-  naturalWidth: number;
-  naturalHeight: number;
-};
-
-export type BoardHandle = {
-  /** Put images, GIFs and videos on the board. */
-  insertFiles: (files: File[]) => void;
-  /** Put traced strokes in the middle of the view, in the pen colour, selected. Returns how many. */
-  insertTraced: (picture: TracedPicture) => number;
-  startMathCheck: () => void;
-  /** Typeset and place an equation in the middle of the view. */
-  insertMath: (value: Pick<MathElement, "syntax" | "source">) => Promise<void>;
-  /** Bring a frame into view and select it, in the part of the board not covered on the right. */
-  goToFrame: (id: string, coveredRight?: number) => void;
-  /** A new frame around what's selected (or the view), in the frame tool's shape. Returns its id. */
-  frameSelection: () => string | null;
-};
-
-type Handle = "nw" | "ne" | "sw" | "se";
-
-/** What a click (press and release without dragging) does. */
-type ClickAction = { kind: "add-card"; boardId: string; columnId: string } | { kind: "media"; id: string };
-
-/** Where a dragged to-do card would land. */
-type CardTarget = { boardId: string; columnId: string; index: number };
-
-type Interaction =
-  | { kind: "none" }
-  | { kind: "pan"; sx: number; sy: number; cam0: Camera }
-  | { kind: "pinch"; dist0: number; mid0: Point; cam0: Camera }
-  | { kind: "draw"; draft: CanvasElement; origin: Point }
-  | { kind: "erase" }
-  | { kind: "move"; start: Point; originals: CanvasElement[]; moved: boolean; click: ClickAction | null }
-  | {
-      kind: "card";
-      boardId: string;
-      cardId: string;
-      start: Point;
-      /** Pointer position relative to the card's top-left corner. */
-      grab: Point;
-      at: Point;
-      active: boolean;
-      target: CardTarget | null;
-    }
-  | { kind: "resize"; handle: Handle; box0: Rect; originals: CanvasElement[]; keepAspect: boolean }
-  | { kind: "marquee"; start: Point; current: Point; base: string[] }
-  | { kind: "lasso"; points: Point[]; checkAfter: boolean };
-
-type TextEdit = {
-  id: string;
-  existing: TextElement | null;
-  x: number;
-  y: number;
-  text: string;
-};
-
-type MathRequest = { region: Rect; polygon: Point[] | null; token: number };
-
-type EquationEdit = { at: Point; existing: MathElement | null };
-
-const MIN_Z = 0.1;
-const MAX_Z = 8;
-const MAX_STROKE_COORDS = 39_998;
-const CLIPBOARD_MARKER = "canvas-elements:v1:";
-
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-const round1 = (v: number) => Math.round(v * 10) / 10;
-
-function newId() {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-const randomSeed = () => 1 + Math.floor(Math.random() * (2 ** 31 - 2));
-
-function isEditableTarget(t: EventTarget | null) {
-  return t instanceof HTMLElement && !!t.closest("input, textarea, select, [contenteditable='true']");
-}
+import { EquationEditor, type EquationValue } from "../equation-editor";
+import { GraphEditor } from "../graph-editor";
+import { KanbanEditor, type KanbanEdit, type KanbanEditorHandle } from "../kanban-editor";
+import { MathCard, type MathState } from "../math-card";
+import { MEDIA_ACCEPT, type Style, type Tool } from "../tools";
+import { ZoomControls } from "../zoom-controls";
+import { Camera, CameraMemory, type Size } from "./camera";
+import { BoardClipboard, cloneElements } from "./clipboard";
+import { DraftSession } from "./drafts";
+import { frameBox, hitForSelect, nextSlide, withFrameContents } from "./frames";
+import { corners } from "./overlays";
+import { AvatarImages } from "./avatars";
+import { BoardPainter, type PaintFrame } from "./painter";
+import {
+  equationEditorSpot,
+  graphEditorSpot,
+  kanbanEditorSpot,
+  mathCardSpot,
+  selectionToolbarSpot,
+  textEditorStyle,
+} from "./placement";
+import { SelectionToolbar } from "./selection-toolbar";
+import { Shortcuts, type BoardCommand } from "./shortcuts";
+import type {
+  BoardHandle,
+  ClickAction,
+  EquationEdit,
+  FlashcardCapture,
+  Handle,
+  Interaction,
+  MathRequest,
+  TextEdit,
+  TracedPicture,
+} from "./types";
+import { mathCheckImage, mathNote, regionBlob, selectionScene, textOf } from "./capture";
+import { cardMoveResult, cardTargetAt, kanbanById, newBoardAt } from "./kanban-drag";
+import { MediaImporter, isMediaFile, tracedStrokes } from "./media";
+import { clamp, isEditableTarget, KEEP_ASPECT, newId, round1, UNERASABLE } from "./util";
 
 // ------------------------------------------------------------------ board
 
@@ -204,6 +122,8 @@ export function Board({
   onTracePicture,
   onOpenFrame,
   onPresentFrame,
+  onDraft,
+  peerDrafts,
   ref,
 }: {
   drawingId: string;
@@ -236,12 +156,16 @@ export function Board({
   onOpenFrame?: (id: string) => void;
   /** Present the slides, starting from this frame. */
   onPresentFrame?: (id: string) => void;
+  /** The stroke or shape being drawn here (changed in place as it grows), or null when it ends: shared live. */
+  onDraft?: (draft: CanvasElement | null) => void;
+  /** What other people are drawing right now, to draw as it grows. */
+  peerDrafts?: PeerDrafts;
   ref?: Ref<BoardHandle>;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const [cam, setCam] = useState<Camera>({ x: -80, y: -60, z: 1 });
+  const [cam, setCam] = useState<Camera>(Camera.initial);
   const [viewport, setViewport] = useState({ w: 0, h: 0 });
   const [selected, setSelected] = useState<string[]>([]);
   const [lassoRegion, setLassoRegion] = useState<Point[] | null>(null);
@@ -266,24 +190,19 @@ export function Board({
     editingId: null as string | null,
     graphPreview: null as GraphElement | null,
     peers: [] as Peer[],
+    peerDrafts: undefined as PeerDrafts | undefined,
     readOnly: false,
   });
-  /** Where each peer's cursor is drawn, easing toward where it really is. */
-  const cursorAnimRef = useRef(new Map<string, Point>());
-  const cursorsMovingRef = useRef(false);
   const interRef = useRef<Interaction>({ kind: "none" });
   const overridesRef = useRef<Map<string, CanvasElement> | null>(null);
   const hiddenRef = useRef(new Set<string>());
   const pointersRef = useRef(new Map<number, Point>());
-  const sceneCacheRef = useRef<HTMLCanvasElement | null>(null);
   const hoverRef = useRef<Point | null>(null);
   /** The frame whose title or edge is under the pointer (select tool). */
   const frameHoverRef = useRef<string | null>(null);
   const spaceRef = useRef(false);
   const camReadyRef = useRef(false);
-  const rafRef = useRef(0);
   const checkAfterLassoRef = useRef(false);
-  const clipboardRef = useRef<CanvasElement[]>([]);
   const mathTokenRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -315,6 +234,7 @@ export function Board({
       editingId: editing?.id ?? null,
       graphPreview,
       peers,
+      peerDrafts,
       readOnly,
     };
   });
@@ -343,14 +263,14 @@ export function Board({
 
   // ------------------------------------------------------------- helpers
 
-  const screenToWorld = (sx: number, sy: number): Point => {
-    const c = camRef.current;
-    return { x: c.x + sx / c.z, y: c.y + sy / c.z };
+  /** The canvas's size in CSS pixels. */
+  const canvasSize = (): Size => {
+    const canvas = canvasRef.current;
+    const dpr = window.devicePixelRatio || 1;
+    return { w: (canvas?.width ?? 0) / dpr, h: (canvas?.height ?? 0) / dpr };
   };
-  const worldToScreen = (p: Point): Point => {
-    const c = camRef.current;
-    return { x: (p.x - c.x) * c.z, y: (p.y - c.y) * c.z };
-  };
+  const screenToWorld = (sx: number, sy: number): Point => camRef.current.toWorld(sx, sy);
+  const worldToScreen = (p: Point): Point => camRef.current.toScreen(p);
   const eventPoint = (e: { clientX: number; clientY: number }) => {
     const r = canvasRef.current!.getBoundingClientRect();
     return { sx: e.clientX - r.left, sy: e.clientY - r.top };
@@ -372,159 +292,70 @@ export function Board({
 
   // ------------------------------------------------------------ rendering
 
-  const paint = useCallback(() => {
-    rafRef.current = 0;
+  const [painter] = useState(() => new BoardPainter());
+  const paint = painter.paint;
+  const schedulePaint = painter.schedule;
+
+  /** One painted frame's worth of the board, read from refs (so the painter never needs remaking). */
+  const readFrame = (): PaintFrame | null => {
     const canvas = canvasRef.current;
     const wrap = wrapRef.current;
-    if (!canvas || !wrap) return;
-    const ctx = canvas.getContext("2d")!;
-    const dpr = window.devicePixelRatio || 1;
-    const c = camRef.current;
+    if (!canvas || !wrap) return null;
     const p = propsRef.current;
     const inter = interRef.current;
-    const w = canvas.width / dpr;
-    const h = canvas.height / dpr;
-
-    // Dot grid that moves and scales with the camera.
-    let gap = 24 * c.z;
-    while (gap < 12) gap *= 4;
-    wrap.style.backgroundColor = p.background;
-    wrap.style.backgroundSize = `${gap}px ${gap}px`;
-    wrap.style.backgroundPosition = `${-c.x * c.z}px ${-c.y * c.z}px`;
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    const world = (tctx: CanvasRenderingContext2D) =>
-      tctx.setTransform(dpr * c.z, 0, 0, dpr * c.z, -c.x * c.z * dpr, -c.y * c.z * dpr);
-
-    if (inter.kind === "draw" && sceneCacheRef.current) {
-      // While drawing, the committed scene doesn't change: reuse a snapshot.
-      ctx.drawImage(sceneCacheRef.current, 0, 0);
-      world(ctx);
-      // The draft is mutated in place while drawing; render a fresh copy so the
-      // per-element caches in render.ts never hold a half-finished shape.
-      drawElement(ctx, cloneDraft(inter.draft), env);
-    } else {
-      world(ctx);
-      const view = { x: c.x, y: c.y, w: w / c.z, h: h / c.z };
-      const hidden = hiddenRef.current;
-      const skip = p.editingId ? new Set([...hidden, p.editingId]) : hidden;
-      const fx = fxRef.current;
-      drawScene(ctx, liveElements(), env, view, skip, fx?.enabled ? fx.stateOf : undefined);
-      // Things that left the drawing, still on their way out.
-      if (fx) for (const g of fx.ghosts()) drawElementFx(ctx, g.el, env, g.state);
-    }
-
-    // ---- overlays (constant screen-space thickness)
-    const px = 1 / c.z;
-    ctx.save();
-    if (p.lassoRegion && p.lassoRegion.length > 2) {
-      tracePolygon(ctx, p.lassoRegion);
-      ctx.fillStyle = "rgba(39,124,120,0.06)";
-      ctx.fill();
-      ctx.setLineDash([6 * px, 5 * px]);
-      ctx.strokeStyle = "#277c78";
-      ctx.lineWidth = 1.5 * px;
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-    const box = inter.kind === "lasso" || inter.kind === "marquee" ? null : selectionBox(p.selected);
-    if (box) {
-      const b = padRect(box, 4 * px);
-      ctx.strokeStyle = "#277c78";
-      ctx.lineWidth = 1.5 * px;
-      ctx.strokeRect(b.x, b.y, b.w, b.h);
-      if (p.selected.length > 1 && !p.lassoRegion) {
-        ctx.setLineDash([3 * px, 3 * px]);
-        for (const id of p.selected) {
-          const el = liveElements().find((e) => e.id === id);
-          if (!el) continue;
-          const eb = elementBounds(el);
-          ctx.strokeRect(eb.x, eb.y, eb.w, eb.h);
-        }
-        ctx.setLineDash([]);
-      }
-      const hs = 9 * px;
-      ctx.fillStyle = "#ffffff";
-      for (const [hx, hy] of corners(b)) {
-        ctx.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
-        ctx.strokeRect(hx - hs / 2, hy - hs / 2, hs, hs);
-      }
-    }
-    if (inter.kind === "card" && inter.active) drawDraggedCard(ctx, inter, elementsRef.current);
-    if (inter.kind === "marquee") {
-      const r = rectFromPoints(inter.start, inter.current);
-      ctx.fillStyle = "rgba(39,124,120,0.08)";
-      ctx.fillRect(r.x, r.y, r.w, r.h);
-      ctx.strokeStyle = "#277c78";
-      ctx.lineWidth = 1 * px;
-      ctx.strokeRect(r.x, r.y, r.w, r.h);
-    }
-    if (inter.kind === "lasso" && inter.points.length > 1) {
-      ctx.beginPath();
-      ctx.moveTo(inter.points[0].x, inter.points[0].y);
-      for (const q of inter.points) ctx.lineTo(q.x, q.y);
-      ctx.strokeStyle = "#277c78";
-      ctx.lineWidth = 2 * px;
-      ctx.setLineDash([6 * px, 5 * px]);
-      ctx.stroke();
-    }
+    const hidden = hiddenRef.current;
+    const elements = liveElements();
     const hover = hoverRef.current;
-    if (p.tool === "eraser" && hover && !spaceRef.current) {
-      ctx.setLineDash([]);
-      ctx.beginPath();
-      ctx.arc(hover.x, hover.y, p.style.eraserSize / 2, 0, Math.PI * 2);
-      ctx.lineWidth = 1.5 * px;
-      ctx.strokeStyle = "rgba(32,31,36,0.65)";
-      ctx.stroke();
-    }
+    return {
+      canvas,
+      wrap,
+      cam: camRef.current,
+      background: p.background,
+      env,
+      elements,
+      skip: p.editingId ? new Set([...hidden, p.editingId]) : hidden,
+      // A fresh copy each frame, so render caches never hold a half-finished shape.
+      draft: inter.kind === "draw" ? inter.session.snapshot() : null,
+      peerDrafts: drawnPeerDrafts(),
+      fx: fxRef.current,
+      overlay: {
+        interaction: inter,
+        elements,
+        committed: elementsRef.current,
+        selected: p.selected,
+        selectionBox: selectionBox(p.selected),
+        lassoRegion: p.lassoRegion,
+        eraser: p.tool === "eraser" && hover && !spaceRef.current ? { at: hover, size: p.style.eraserSize } : null,
+        peers: p.peers,
+        avatar: (peer) => (peer.avatarUrl ? AvatarImages.shared.get(peer.avatarUrl, schedulePaint) : null),
+      },
+    };
+  };
 
-    // Other people: what they have selected, then their cursors on top.
-    if (p.peers.length) {
-      const byId = new Map(liveElements().map((e) => [e.id, e]));
-      ctx.setLineDash([5 * px, 4 * px]);
-      ctx.lineWidth = 1.5 * px;
-      for (const peer of p.peers) {
-        const boxes = peer.selection.flatMap((id) => (byId.has(id) ? [elementBounds(byId.get(id)!)] : []));
-        const b = unionRects(boxes);
-        if (!b) continue;
-        const r = padRect(b, 6 * px);
-        ctx.strokeStyle = peer.color;
-        ctx.strokeRect(r.x, r.y, r.w, r.h);
-      }
-      ctx.setLineDash([]);
-      const anim = cursorAnimRef.current;
-      let moving = false;
-      for (const peer of p.peers) {
-        if (!peer.cursor) {
-          anim.delete(peer.clientId);
-          continue;
-        }
-        const target = peer.cursor;
-        const prev = anim.get(peer.clientId);
-        let at = target;
-        if (prev) {
-          const dx = target.x - prev.x;
-          const dy = target.y - prev.y;
-          if (Math.hypot(dx, dy) * c.z > 0.5) {
-            at = { x: prev.x + dx * 0.35, y: prev.y + dy * 0.35 };
-            moving = true;
-          }
-        }
-        anim.set(peer.clientId, at);
-        drawPeerCursor(ctx, at, peer.name, peer.color, px);
-      }
-      cursorsMovingRef.current = moving;
-    }
-    ctx.restore();
-    // env and helpers only read refs, so this callback never needs to change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const schedulePaint = useCallback(() => {
-    if (!rafRef.current) rafRef.current = requestAnimationFrame(paint);
-  }, [paint]);
+  /** Ids on the board now, for telling which peers' drafts have landed. */
+  const elementIdsRef = useRef<Set<string>>(new Set());
+  useLayoutEffect(() => {
+    elementIdsRef.current = new Set(elements.map((e) => e.id));
+  }, [elements]);
+  // A draft whose finished element never comes (someone's click, not a stroke) goes after a moment.
+  useEffect(() => {
+    if (!peers.length) return;
+    const t = setTimeout(schedulePaint, 1700);
+    return () => clearTimeout(t);
+  }, [peers, schedulePaint]);
+  /**
+   * Other people's strokes and shapes as they draw them. Each is noted as
+   * already on screen, so it doesn't play an entrance when it lands.
+   */
+  const drawnPeerDrafts = () => {
+    const drafts = propsRef.current.peerDrafts;
+    if (!drafts) return [];
+    const ids = elementIdsRef.current;
+    const list = drafts.visible((id) => ids.has(id));
+    for (const d of list) ownAddsRef.current.add(d.id);
+    return list;
+  };
+  useLayoutEffect(() => painter.connect(readFrame));
 
   useEffect(() => {
     schedulePaint();
@@ -533,12 +364,7 @@ export function Board({
   // ------------------------------------------------------------ effects
 
   /** The part of the drawing on screen, in world coordinates. */
-  const viewRect = useCallback((): Rect => {
-    const c = camRef.current;
-    const canvas = canvasRef.current;
-    const dpr = window.devicePixelRatio || 1;
-    return { x: c.x, y: c.y, w: (canvas?.width ?? 0) / dpr / c.z, h: (canvas?.height ?? 0) / dpr / c.z };
-  }, []);
+  const viewRect = useCallback((): Rect => camRef.current.view(canvasSize()), []);
 
   // Made before the first paint, so a drawing that's opening stays hidden until its replay starts.
   useLayoutEffect(() => {
@@ -601,12 +427,12 @@ export function Board({
     if (!peers.some((p) => p.cursor)) return;
     let raf = 0;
     const tick = () => {
-      if (cursorsMovingRef.current) schedulePaint();
+      if (painter.cursors.moving) schedulePaint();
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [peers, schedulePaint]);
+  }, [peers, painter, schedulePaint]);
 
   // GIFs animate and playing videos show new frames: a light loop while any are on the board.
   const hasMedia = elements.some((e) => e.type === "gif" || e.type === "video");
@@ -645,7 +471,7 @@ export function Board({
   // Equations typeset in the background; repaint as each one is ready.
   useEffect(() => subscribeMath(schedulePaint), [schedulePaint]);
 
-  useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
+  useEffect(() => () => painter.dispose(), [painter]);
 
   // Re-measure text once web fonts (Caveat, Public Sans) are ready.
   useEffect(() => {
@@ -660,16 +486,15 @@ export function Board({
 
   // ------------------------------------------------------------- camera
 
-  const cameraKey = `canvas-camera:${drawingId}`;
+  const cameraMemory = useMemo(() => new CameraMemory(drawingId), [drawingId]);
 
   const applyCam = useCallback(
     (next: Camera) => {
-      const c = { x: next.x, y: next.y, z: clamp(next.z, MIN_Z, MAX_Z) };
-      camRef.current = c;
-      setCam(c);
+      camRef.current = next;
+      setCam(next);
       schedulePaint();
       // The study buddies walking on the canvas follow it in the same frame.
-      publishView(c);
+      publishView(next);
     },
     [schedulePaint],
   );
@@ -678,27 +503,17 @@ export function Board({
   useEffect(() => publishScene(elements), [elements]);
   useEffect(() => () => publishScene(null), []);
 
+  /** Zoom to `z`, keeping what's under the screen point (sx, sy) in place. */
   const zoomAt = useCallback(
-    (sx: number, sy: number, z: number) => {
-      const c = camRef.current;
-      const nz = clamp(z, MIN_Z, MAX_Z);
-      const wx = c.x + sx / c.z;
-      const wy = c.y + sy / c.z;
-      applyCam({ x: wx - sx / nz, y: wy - sy / nz, z: nz });
-    },
+    (sx: number, sy: number, z: number) => applyCam(camRef.current.zoomedAt(sx, sy, z)),
     [applyCam],
   );
 
+  /** Fit a rectangle on screen (zoomed in no further than `maxZ`), beside a panel covering the right. */
   const zoomToRect = useCallback(
     (r: Rect | null, maxZ = 1, coveredRight = 0) => {
-      const canvas = canvasRef.current;
-      if (!canvas || !r) return;
-      const dpr = window.devicePixelRatio || 1;
-      // A side panel over the right of the board: fit into what's still visible.
-      const w = Math.max(160, canvas.width / dpr - coveredRight);
-      const h = canvas.height / dpr;
-      const z = clamp(Math.min((w * 0.85) / Math.max(r.w, 1), (h * 0.85) / Math.max(r.h, 1)), MIN_Z, maxZ);
-      applyCam({ x: r.x + r.w / 2 - w / 2 / z, y: r.y + r.h / 2 - h / 2 / z, z });
+      if (!canvasRef.current || !r) return;
+      applyCam(Camera.fitting(r, canvasSize(), maxZ, coveredRight));
     },
     [applyCam],
   );
@@ -706,13 +521,8 @@ export function Board({
   // Remember the view per drawing (per device): debounced while moving,
   // and flushed when leaving so a quick navigation doesn't lose it.
   const saveCamera = useCallback(() => {
-    if (!camReadyRef.current) return;
-    try {
-      localStorage.setItem(cameraKey, JSON.stringify(camRef.current));
-    } catch {
-      /* storage full or disabled: not important */
-    }
-  }, [cameraKey]);
+    if (camReadyRef.current) cameraMemory.save(camRef.current);
+  }, [cameraMemory]);
 
   useEffect(() => {
     const t = setTimeout(saveCamera, 300);
@@ -741,25 +551,20 @@ export function Board({
       setViewport({ w: width, h: height });
       if (!camReadyRef.current && width > 0 && height > 0) {
         camReadyRef.current = true;
-        let saved: Camera | null = null;
-        try {
-          saved = JSON.parse(localStorage.getItem(cameraKey) ?? "null");
-        } catch {
-          saved = null;
-        }
-        if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) && Number.isFinite(saved.z)) {
+        const saved = cameraMemory.load();
+        if (saved) {
           applyCam(saved);
         } else {
           const b = contentBounds(elementsRef.current);
           if (b) zoomToRect(padRect(b, 40), 1);
-          else applyCam({ x: -width / 2 + 200, y: -80, z: 1 });
+          else applyCam(new Camera(-width / 2 + 200, -80, 1));
         }
       }
       paint();
     });
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, [applyCam, zoomToRect, paint, cameraKey]);
+  }, [applyCam, zoomToRect, paint, cameraMemory]);
 
   // Wheel: pan by default, zoom with Ctrl/⌘ (also what trackpad pinch sends).
   useEffect(() => {
@@ -779,7 +584,7 @@ export function Board({
         const dx = e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX;
         const dy = e.shiftKey && !e.deltaX ? 0 : e.deltaY;
         const unit = e.deltaMode === 1 ? 16 : 1;
-        applyCam({ x: c.x + (dx * unit) / c.z, y: c.y + (dy * unit) / c.z, z: c.z });
+        applyCam(c.panned(dx * unit, dy * unit));
       }
     };
     wrap.addEventListener("wheel", onWheel, { passive: false });
@@ -949,47 +754,12 @@ export function Board({
     setKanbanEdit({ ...edit, newCardId: newId() });
   };
 
-  const boardById = (id: string) => {
-    const el = elementsRef.current.find((e) => e.id === id);
-    return el?.type === "kanban" ? el : null;
-  };
-
   /** Put a new board where the pointer is, sized to look the same at any zoom, and ask for its first card. */
   const placeKanban = (p: Point) => {
-    const scale = Math.round(clamp(1 / camRef.current.z, 0.05, 50) * 1000) / 1000;
-    const draft = newKanban({ id: newId(), x: 0, y: 0, scale, ids: newId });
-    const w = kanbanLayout(draft).w;
-    const board: KanbanElement = { ...draft, x: round1(p.x - w / 2), y: round1(p.y - 24 * scale) };
+    const board = newBoardAt(p, camRef.current.z);
     dispatch({ type: "add", elements: [board] });
     setTool("select");
     openKanban({ mode: "card", boardId: board.id, columnId: board.columns[0].id, cardId: null });
-  };
-
-  /** Where a dragged card would land if dropped at `p`: the topmost board under it. */
-  const cardTargetAt = (boardId: string, cardId: string, p: Point): CardTarget | null => {
-    const src = boardById(boardId);
-    if (!src || !findCard(src, cardId)) return null;
-    const without = withoutCard(src, cardId);
-    const els = elementsRef.current;
-    const slack = 16 / camRef.current.z;
-    for (let i = els.length - 1; i >= 0; i--) {
-      const el = els[i];
-      if (el.type !== "kanban") continue;
-      const b = el.id === src.id ? without : el;
-      const l = kanbanLayout(b);
-      if (p.x < l.x - slack || p.x > l.x + l.w + slack || p.y < l.y - slack || p.y > l.y + l.h + slack) continue;
-      return { boardId: el.id, ...dropSlot(b, p) };
-    }
-    return null;
-  };
-
-  /** The boards as they'd be after dropping the card on `target`, or null if nothing would change. */
-  const cardMoveResult = (boardId: string, cardId: string, target: CardTarget | null) => {
-    if (!target) return null;
-    const src = boardById(boardId);
-    const dst = boardById(target.boardId);
-    if (!src || !dst) return null;
-    return moveCard(src, dst, { cardId, columnId: target.columnId, index: target.index });
   };
 
   const runClick = (click: ClickAction) => {
@@ -1008,19 +778,7 @@ export function Board({
       const token = ++mathTokenRef.current;
       const req: MathRequest = { region, polygon, token };
       setMath({ req, state: { status: "loading" } });
-
-      const longest = Math.max(region.w, region.h, 1);
-      const scale = clamp(1400 / longest, 0.5, 4);
-      const canvas = renderRegion({
-        elements: elementsRef.current,
-        background: propsRef.current.background,
-        region,
-        scale,
-        env: pictureEnv(),
-        clip: polygon ?? undefined,
-      });
-      let dataUrl = canvas.toDataURL("image/png");
-      if (dataUrl.length > 4_000_000) dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+      const dataUrl = mathCheckImage(elementsRef.current, propsRef.current.background, region, polygon, pictureEnv());
 
       try {
         const result = await onCheckMath(dataUrl);
@@ -1051,47 +809,10 @@ export function Board({
 
   /** The selection (or lasso) as a picture: only what's selected, or everything inside the loop. */
   const captureSelection = async (): Promise<FlashcardCapture | null> => {
-    const set = new Set(selected);
-    const chosen = elementsRef.current.filter((el) => set.has(el.id));
-    let region: Rect | null = null;
-    let polygon: Point[] | undefined;
-    let scene: CanvasElement[] = chosen;
-    if (lassoRegion && lassoRegion.length > 2) {
-      const b = polygonBounds(lassoRegion);
-      region = b ? padRect(b, 8) : null;
-      polygon = lassoRegion;
-      scene = elementsRef.current;
-    } else {
-      const box = unionRects(chosen.map(elementBounds));
-      region = box ? padRect(box, 16) : null;
-    }
-    if (!region) return null;
-    const scale = clamp(1200 / Math.max(region.w, region.h, 1), 0.25, 3);
-    const canvas = renderRegion({
-      elements: scene,
-      background: propsRef.current.background,
-      region,
-      scale,
-      env: pictureEnv(),
-      clip: polygon,
-    });
-    const blob =
-      (await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/webp", 0.9))) ??
-      (await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/png")));
-    if (!blob) return null;
-    const text = chosen
-      .flatMap((el) =>
-        el.type === "text"
-          ? [el.text]
-          : el.type === "math"
-            ? [el.source]
-            : el.type === "kanban"
-              ? [el.title, ...el.columns.flatMap((c) => c.cards.map((k) => `${c.title}: ${k.text}`))]
-              : [],
-      )
-      .join("\n")
-      .slice(0, 2000);
-    return { blob, width: canvas.width, height: canvas.height, text };
+    const what = selectionScene(elementsRef.current, selected, lassoRegion);
+    if (!what) return null;
+    const picture = await regionBlob(what.scene, propsRef.current.background, what.region, what.polygon, pictureEnv());
+    return picture ? { ...picture, text: textOf(what.chosen) } : null;
   };
 
   const makeFlashcard = async () => {
@@ -1101,26 +822,7 @@ export function Board({
 
   const addMathNote = (result: MathCheck) => {
     if (!math) return;
-    const r = math.req.region;
-    const good = result.verdict === "correct";
-    const fontSize = clamp(Math.round(r.h / 5), 20, 64);
-    const words = (good ? "✓ Correct" : `✗ ${result.summary || "Check this step"}`).split(/\s+/);
-    const lines: string[] = [];
-    for (const word of words) {
-      const last = lines[lines.length - 1];
-      if (last && (last + " " + word).length <= 34) lines[lines.length - 1] = last + " " + word;
-      else lines.push(word);
-    }
-    const note: TextElement = {
-      id: newId(),
-      type: "text",
-      x: round1(r.x + r.w + 16),
-      y: round1(r.y),
-      text: lines.join("\n"),
-      color: good ? "#277c78" : "#c94736",
-      fontSize,
-      font: "hand",
-    };
+    const note = mathNote(result, math.req.region);
     dispatch({ type: "add", elements: [note] });
     setSelected([note.id]);
     setLassoRegion(null);
@@ -1132,108 +834,23 @@ export function Board({
   const insertFiles = useCallback(
     async (files: File[], at?: Point) => {
       const cache = propsRef.current.images;
-      if (!cache) return;
-      const usable = files.filter((f) => {
-        const type = fileType(f);
-        return type.startsWith("image/") || isVideoType(type);
-      });
-      if (usable.length === 0) {
-        if (files.length) toast.error("Only images, GIFs and videos (MP4, WebM, MOV) can go on the board.");
-        return;
-      }
-      const canvas = canvasRef.current!;
-      const dpr = window.devicePixelRatio || 1;
+      if (!cache || !canvasRef.current) return;
       const c = camRef.current;
-      const viewW = canvas.width / dpr / c.z;
-      const viewH = canvas.height / dpr / c.z;
-      const center = at ?? { x: c.x + viewW / 2, y: c.y + viewH / 2 };
-      const added: AssetElement[] = [];
-      let offset = 0;
-      for (const file of usable) {
-        const type = fileType(file);
-        try {
-          let kind: AssetElement["type"] = "image";
-          let a: { id: string; width: number; height: number };
-          let pixelScale = dpr;
-          if (isVideoType(type)) {
-            if (usable.length === 1) toast.loading("Adding the video…", { id: "media" });
-            a = await cache.addVideo(file, type);
-            kind = "video";
-            pixelScale = 1;
-          } else {
-            const gif = type === "image/gif" ? await inspectGif(file) : null;
-            if (gif && gif.frames > 1) {
-              a = await cache.addGif(file, gif);
-              kind = "gif";
-              pixelScale = 1;
-            } else {
-              a = await cache.add(file);
-            }
-          }
-          // Screenshots are usually 2× pixels: show them at their on-screen size,
-          // but no bigger than 60 % of the view.
-          let w = a.width / pixelScale;
-          let h = a.height / pixelScale;
-          const fit = Math.min(1, (viewW * 0.6) / w, (viewH * 0.6) / h);
-          w *= fit;
-          h *= fit;
-          added.push({
-            id: newId(),
-            type: kind,
-            assetId: a.id,
-            x: round1(center.x - w / 2 + offset),
-            y: round1(center.y - h / 2 + offset),
-            w: round1(w),
-            h: round1(h),
-          });
-          offset += 24 / c.z;
-        } catch (err) {
-          if (err instanceof AssetError) toast.error(err.message, { id: "media" });
-          else {
-            console.warn("[board] couldn't add file", err);
-            toast.error(`Couldn't add ${file.name || "that file"}.`, { id: "media" });
-          }
-        }
-      }
-      if (added.length) {
-        toast.dismiss("media");
-        dispatch({ type: "add", elements: added });
-        setSelected(added.map((a) => a.id));
-        setLassoRegion(null);
-        setTool("select");
-      }
+      const view = c.view(canvasSize());
+      const added = await new MediaImporter(cache).import(files, at ?? c.center(canvasSize()), view, c.z);
+      if (!added.length) return;
+      dispatch({ type: "add", elements: added });
+      setSelected(added.map((a) => a.id));
+      setLassoRegion(null);
+      setTool("select");
     },
     [dispatch, setTool],
   );
 
-  /**
-   * Traced strokes go where a picture would: in the middle of the view, at
-   * the picture's on-screen size (a phone photo is shrunk to 60 % of the
-   * view; a screenshot keeps its size), as one change that one undo removes.
-   */
+  /** Traced strokes, placed like a picture, as one change that one undo removes. */
   const insertTraced = (picture: TracedPicture): number => {
-    const canvas = canvasRef.current;
-    if (!canvas || picture.strokes.length === 0) return 0;
-    const dpr = window.devicePixelRatio || 1;
-    const c = camRef.current;
-    const viewW = canvas.width / dpr / c.z;
-    const viewH = canvas.height / dpr / c.z;
-    const w0 = picture.naturalWidth / dpr;
-    const h0 = picture.naturalHeight / dpr;
-    const fit = Math.min(1, (viewW * 0.6) / w0, (viewH * 0.6) / h0);
-    const k = (w0 * fit) / picture.width; // world units per traced pixel
-    const x0 = c.x + viewW / 2 - (picture.width * k) / 2;
-    const y0 = c.y + viewH / 2 - (picture.height * k) / 2;
-    const s = propsRef.current.style;
-    const color = s.color === "#ffffff" ? "#201f24" : s.color;
-    const added: CanvasElement[] = picture.strokes.map((st) => ({
-      id: newId(),
-      type: "stroke",
-      color,
-      brush: "marker",
-      size: clamp(round1(st.size * k), 0.5, 400),
-      points: st.points.slice(0, MAX_STROKE_COORDS).map((v, i) => round1(i % 2 === 0 ? x0 + v * k : y0 + v * k)),
-    }));
+    if (!canvasRef.current || picture.strokes.length === 0) return 0;
+    const added = tracedStrokes(picture, camRef.current.view(canvasSize()), propsRef.current.style.color);
     dispatch({ type: "add", elements: added });
     setSelected(added.map((a) => a.id));
     setLassoRegion(null);
@@ -1241,46 +858,9 @@ export function Board({
     return added.length;
   };
 
-  /** A frame's box in the frame tool's shape: around `content` (padded), or 60% of the view centred on `at`. */
-  const frameAround = (at: Point, content: Rect | null): Rect => {
-    const z = camRef.current.z;
-    const ratio = FRAME_ASPECTS.find((a) => a.id === propsRef.current.style.frameAspect)?.ratio ?? null;
-    let w: number;
-    let h: number;
-    let cx = at.x;
-    let cy = at.y;
-    if (content) {
-      const pad = Math.max(content.w, content.h) * 0.06 + 16 / z;
-      w = content.w + pad * 2;
-      h = content.h + pad * 2;
-      cx = content.x + content.w / 2;
-      cy = content.y + content.h / 2;
-      if (ratio) {
-        if (w / ratio >= h) h = w / ratio;
-        else w = h * ratio;
-      }
-    } else {
-      const r = ratio ?? 16 / 9;
-      const vw = Math.max(viewport.w, 320) / z;
-      const vh = Math.max(viewport.h, 240) / z;
-      w = vw * 0.6;
-      h = w / r;
-      if (h > vh * 0.6) {
-        h = vh * 0.6;
-        w = h * r;
-      }
-    }
-    return { x: round1(cx - w / 2), y: round1(cy - h / 2), w: round1(Math.max(1, w)), h: round1(Math.max(1, h)) };
-  };
-
-  /** A new frame's title and place in the slide order: after the last slide. */
-  const nextSlide = () => {
-    const slides = slidesOf(elementsRef.current);
-    return {
-      title: `Slide ${slides.length + 1}`,
-      order: slides.length ? Math.floor(slides[slides.length - 1].order) + 1 : 1,
-    };
-  };
+  /** A new frame's box in the frame tool's shape: around `content`, or most of the view around `at`. */
+  const frameAround = (at: Point, content: Rect | null): Rect =>
+    frameBox(at, content, propsRef.current.style.frameAspect, viewport, camRef.current.z);
 
   const goToFrame = (id: string, coveredRight = 0) => {
     const frame = elementsRef.current.find((el) => el.id === id);
@@ -1299,7 +879,12 @@ export function Board({
         : unionRects(elementsRef.current.filter((el) => set.has(el.id) && el.type !== "eraser").map(elementBounds));
     const c = camRef.current;
     const center = { x: c.x + viewport.w / 2 / c.z, y: c.y + viewport.h / 2 / c.z };
-    const frame: FrameElement = { id: newId(), type: "frame", ...frameAround(center, content), ...nextSlide() };
+    const frame: FrameElement = {
+      id: newId(),
+      type: "frame",
+      ...frameAround(center, content),
+      ...nextSlide(elementsRef.current),
+    };
     ownAddsRef.current.add(frame.id);
     dispatch({ type: "add", elements: [frame] });
     setSelected([frame.id]);
@@ -1327,28 +912,11 @@ export function Board({
 
   const hitTolerance = () => 6 / camRef.current.z;
 
-  /** A frame whose title is at this point (titles sit above frames, at screen size). */
-  const frameTitleAt = (p: Point): FrameElement | null => {
-    const px = 1 / camRef.current.z;
-    const els = elementsRef.current;
-    for (let i = els.length - 1; i >= 0; i--) {
-      const el = els[i];
-      if (el.type === "frame" && pointInRect(p, frameLabelRect(el, el.title, px))) return el;
-    }
-    return null;
-  };
   /** What a select-tool click lands on: a frame's title first, then the topmost thing drawn. */
-  const hitAt = (p: Point) => frameTitleAt(p) ?? hitTestAll(elementsRef.current, p, hitTolerance());
+  const hitAt = (p: Point) => hitForSelect(elementsRef.current, p, camRef.current.z, hitTolerance());
 
-  /** These elements, plus whatever sits wholly inside any frame among them: frames carry their contents. */
-  const withFrameContents = (ids: ReadonlySet<string>) => {
-    const els = elementsRef.current;
-    const carried = new Set(ids);
-    for (const el of els) {
-      if (el.type === "frame" && ids.has(el.id)) for (const c of insideFrame(els, el)) carried.add(c.id);
-    }
-    return els.filter((el) => carried.has(el.id));
-  };
+  /** These elements, and what's inside any frame among them. */
+  const carried = (ids: ReadonlySet<string>) => withFrameContents(elementsRef.current, ids);
 
   const handleAt = (sx: number, sy: number): Handle | null => {
     const box = selectionBox(selected);
@@ -1391,90 +959,27 @@ export function Board({
     }
   };
 
-  const startDraft = (p: Point, e: React.PointerEvent): CanvasElement | null => {
-    const s = style;
-    const id = newId();
-    const sketch = s.sketchy ? { seed: randomSeed(), roughness: s.roughness, fillStyle: s.fillStyle } : undefined;
-    switch (tool) {
-      case "pen": {
-        const pressure = e.pointerType === "pen" && e.pressure > 0 ? [round2(e.pressure)] : undefined;
-        return {
-          id,
-          type: "stroke",
-          color: s.color,
-          size: s.brush === "highlighter" ? s.highlighterSize : s.penSize,
-          brush: s.brush,
-          points: [round1(p.x), round1(p.y)],
-          ...(pressure && s.brush === "ink" ? { pressures: pressure } : {}),
-        };
-      }
-      case "eraser":
-        return s.eraserMode === "pixel"
-          ? { id, type: "eraser", size: s.eraserSize, points: [round1(p.x), round1(p.y)] }
-          : null;
-      case "line":
-      case "arrow":
-        return {
-          id,
-          type: "line",
-          color: s.color,
-          size: s.shapeSize,
-          x1: round1(p.x),
-          y1: round1(p.y),
-          x2: round1(p.x),
-          y2: round1(p.y),
-          ...(tool === "arrow" ? { arrow: true } : {}),
-          ...(sketch ? { sketch } : {}),
-        };
-      case "graph":
-        return {
-          id,
-          type: "graph",
-          x: round1(p.x),
-          y: round1(p.y),
-          w: 0,
-          h: 0,
-          fns: [{ expr: "sin(x)", color: GRAPH_COLORS[0] }],
-          xMin: -10,
-          xMax: 10,
-          yMin: -4,
-          yMax: 4,
-          grid: true,
-        };
-      case "frame":
-        return { id, type: "frame", x: round1(p.x), y: round1(p.y), w: 0, h: 0, ...nextSlide() };
-      case "rect":
-      case "ellipse":
-        return {
-          id,
-          type: tool,
-          color: s.color,
-          size: s.shapeSize,
-          fill: s.fill ? s.color : null,
-          x: round1(p.x),
-          y: round1(p.y),
-          w: 0,
-          h: 0,
-          ...(sketch ? { sketch } : {}),
-        };
-      default:
-        return null;
-    }
+  /** A stroke or shape starting at `p` with the current tool, held over a picture of the scene. */
+  const startDrawing = (p: Point, e: React.PointerEvent) => {
+    const session = DraftSession.start(tool, p, style, {
+      pressure: e.pointerType === "pen" && e.pressure > 0 ? e.pressure : undefined,
+      slide: () => nextSlide(elementsRef.current),
+    });
+    if (!session) return false;
+    holdScene();
+    interRef.current = { kind: "draw", session };
+    onDraft?.(session.draft);
+    setSelected([]);
+    setLassoRegion(null);
+    return true;
   };
 
-  const snapshotScene = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    // The snapshot is drawn over until the stroke ends, so settle any effects first.
-    fxRef.current?.finishAll();
-    kanbanFxRef.current?.dispose();
-    paint(); // make sure the canvas shows the committed scene
-    const copy = document.createElement("canvas");
-    copy.width = canvas.width;
-    copy.height = canvas.height;
-    copy.getContext("2d")!.drawImage(canvas, 0, 0);
-    sceneCacheRef.current = copy;
-  };
+  /** While a stroke is drawn, the rest of the scene is a still picture (effects settled first). */
+  const holdScene = () =>
+    painter.hold(() => {
+      fxRef.current?.finishAll();
+      kanbanFxRef.current?.dispose();
+    });
 
   const eraseAt = (p: Point) => {
     const r = style.eraserSize / 2;
@@ -1522,7 +1027,8 @@ export function Board({
       const [a, b] = [...pointersRef.current.values()];
       hiddenRef.current.clear();
       overridesRef.current = null;
-      sceneCacheRef.current = null;
+      painter.release();
+      if (interRef.current.kind === "draw") onDraft?.(null);
       interRef.current = {
         kind: "pinch",
         dist0: Math.hypot(a.x - b.x, a.y - b.y),
@@ -1595,7 +1101,7 @@ export function Board({
             kind: "move",
             start: p,
             // Alt moves a frame without what's in it.
-            originals: readOnly ? [] : e.altKey ? elementsRef.current.filter((el) => set.has(el.id)) : withFrameContents(set),
+            originals: readOnly ? [] : e.altKey ? elementsRef.current.filter((el) => set.has(el.id)) : carried(set),
             moved: false,
             click,
           };
@@ -1631,12 +1137,7 @@ export function Board({
           openGraph(hit);
           return;
         }
-        const draft = startDraft(p, e);
-        if (!draft) return;
-        snapshotScene();
-        interRef.current = { kind: "draw", draft, origin: p };
-        setSelected([]);
-        setLassoRegion(null);
+        if (!startDrawing(p, e)) return;
         break;
       }
       case "eraser":
@@ -1646,14 +1147,8 @@ export function Board({
           break;
         }
       // falls through: pixel eraser draws like a pen
-      default: {
-        const draft = startDraft(p, e);
-        if (!draft) return;
-        snapshotScene();
-        interRef.current = { kind: "draw", draft, origin: p };
-        setSelected([]);
-        setLassoRegion(null);
-      }
+      default:
+        if (!startDrawing(p, e)) return;
     }
     setInteracting(true);
     schedulePaint();
@@ -1690,90 +1185,33 @@ export function Board({
         const [a, b] = [...pointersRef.current.values()];
         const dist = Math.hypot(a.x - b.x, a.y - b.y);
         const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-        const c0 = inter.cam0;
-        const z = clamp((c0.z * dist) / Math.max(inter.dist0, 1), MIN_Z, MAX_Z);
-        // Keep the world point that was under the starting midpoint under the fingers.
-        const wx = c0.x + inter.mid0.x / c0.z;
-        const wy = c0.y + inter.mid0.y / c0.z;
-        applyCam({ x: wx - mid.x / z, y: wy - mid.y / z, z });
+        applyCam(inter.cam0.pinched(inter.mid0, inter.dist0, mid, dist));
         return;
       }
       case "pan": {
-        const c0 = inter.cam0;
-        applyCam({ x: c0.x - (sx - inter.sx) / c0.z, y: c0.y - (sy - inter.sy) / c0.z, z: c0.z });
+        applyCam(inter.cam0.panned(inter.sx - sx, inter.sy - sy));
         return;
       }
       case "draw": {
-        const d = inter.draft;
-        if (d.type === "stroke" || d.type === "eraser") {
+        const session = inter.session;
+        if (session.freehand) {
           const coalesced = e.nativeEvent.getCoalescedEvents?.();
           const events = coalesced && coalesced.length > 0 ? coalesced : [e.nativeEvent];
-          const minStep = 0.75 / camRef.current.z;
-          for (const ev of events) {
+          const samples = events.map((ev) => {
             const q = eventPoint(ev);
-            const w = screenToWorld(q.sx, q.sy);
-            const n = d.points.length;
-            const dx = w.x - d.points[n - 2];
-            const dy = w.y - d.points[n - 1];
-            if (dx * dx + dy * dy < minStep * minStep) continue;
-            d.points.push(round1(w.x), round1(w.y));
-            if (d.type === "stroke" && d.pressures) d.pressures.push(round2(ev.pressure || 0.5));
-          }
-          if (d.points.length >= MAX_STROKE_COORDS) {
-            ownAddsRef.current.add(d.id);
-            dispatch({ type: "add", elements: [cloneDraft(d)] });
-            inter.draft = {
-              ...d,
-              id: newId(),
-              points: d.points.slice(-2),
-              ...(d.type === "stroke" && d.pressures ? { pressures: d.pressures.slice(-1) } : {}),
-            } as CanvasElement;
-            snapshotScene();
+            return { ...screenToWorld(q.sx, q.sy), pressure: ev.pressure };
+          });
+          const done = session.addSamples(samples, 0.75 / camRef.current.z);
+          if (done) {
+            // A very long stroke: what's drawn so far is added, and the stroke carries on as a new one.
+            ownAddsRef.current.add(done.id);
+            dispatch({ type: "add", elements: [done] });
+            holdScene();
           }
         } else {
-          const o = inter.origin;
-          let dx = p.x - o.x;
-          let dy = p.y - o.y;
-          if (d.type === "line") {
-            if (e.shiftKey) {
-              const step = Math.PI / 4;
-              const ang = Math.round(Math.atan2(dy, dx) / step) * step;
-              const len = Math.hypot(dx, dy);
-              dx = Math.cos(ang) * len;
-              dy = Math.sin(ang) * len;
-            }
-            d.x2 = round1(o.x + dx);
-            d.y2 = round1(o.y + dy);
-          } else if (d.type === "graph") {
-            const r = rectFromPoints(o, p);
-            d.x = round1(r.x);
-            d.y = round1(r.y);
-            d.w = round1(r.w);
-            d.h = round1(r.h);
-          } else if (d.type === "frame") {
-            // The frame tool's shape; Shift draws any shape (or a square, when the shape is "Any").
-            const ratio = FRAME_ASPECTS.find((a) => a.id === style.frameAspect)?.ratio ?? null;
-            const r = e.shiftKey ? (ratio ? null : 1) : ratio;
-            let w = Math.abs(dx);
-            let h = Math.abs(dy);
-            if (r) {
-              if (w / r >= h) h = w / r;
-              else w = h * r;
-            }
-            d.x = round1(dx < 0 ? o.x - w : o.x);
-            d.y = round1(dy < 0 ? o.y - h : o.y);
-            d.w = round1(w);
-            d.h = round1(h);
-          } else if (d.type === "rect" || d.type === "ellipse") {
-            if (e.shiftKey) {
-              const m = Math.max(Math.abs(dx), Math.abs(dy));
-              dx = Math.sign(dx || 1) * m;
-              dy = Math.sign(dy || 1) * m;
-            }
-            d.w = round1(dx);
-            d.h = round1(dy);
-          }
+          session.reshape(p, e.shiftKey, style.frameAspect);
         }
+        onDraft?.(session.draft);
         break;
       }
       case "erase": {
@@ -1801,9 +1239,9 @@ export function Board({
           inter.active = true;
           setCursor("grabbing");
         }
-        inter.target = cardTargetAt(inter.boardId, inter.cardId, p);
+        inter.target = cardTargetAt(elementsRef.current, inter.boardId, inter.cardId, p, camRef.current.z);
         // Preview: the card's slot opens up where it would land.
-        const moved = cardMoveResult(inter.boardId, inter.cardId, inter.target);
+        const moved = cardMoveResult(elementsRef.current, inter.boardId, inter.cardId, inter.target);
         overridesRef.current = moved ? new Map(moved.map((el) => [el.id, el])) : null;
         break;
       }
@@ -1847,48 +1285,25 @@ export function Board({
       return;
     }
     interRef.current = { kind: "none" };
-    sceneCacheRef.current = null;
+    painter.release();
+    if (inter.kind === "draw") onDraft?.(null);
 
     if (!cancelled) {
       switch (inter.kind) {
         case "draw": {
-          const d = inter.draft;
-          if (d.type === "graph") {
-            const z = camRef.current.z;
-            let g: GraphElement;
-            if (d.w * z >= 40 && d.h * z >= 40) {
-              g = { ...d, w: Math.max(40, d.w), h: Math.max(40, d.h) };
-            } else {
-              // A click: a graph about 480 × 320 on screen, centred there.
-              const w = round1(clamp(480 / z, 80, 4000));
-              const h = round1(clamp(320 / z, 60, 3000));
-              g = { ...d, x: round1(inter.origin.x - w / 2), y: round1(inter.origin.y - h / 2), w, h };
-            }
-            dispatch({ type: "add", elements: [g] });
-            openGraph(g);
-            break;
-          }
-          if (d.type === "frame") {
-            const z = camRef.current.z;
-            const frame: FrameElement =
-              d.w * z >= 12 && d.h * z >= 12
-                ? { ...d }
-                : { ...d, ...frameAround(inter.origin, null) };
-            ownAddsRef.current.add(frame.id);
-            dispatch({ type: "add", elements: [frame] });
-            setSelected([frame.id]);
+          const el = inter.session.finish(camRef.current.z, (at) => frameAround(at, null));
+          if (!el) break;
+          if (el.type === "graph") {
+            dispatch({ type: "add", elements: [el] });
+            openGraph(el);
+          } else if (el.type === "frame") {
+            ownAddsRef.current.add(el.id);
+            dispatch({ type: "add", elements: [el] });
+            setSelected([el.id]);
             setTool("select");
-            break;
-          }
-          const meaningful =
-            d.type === "line"
-              ? Math.hypot(d.x2 - d.x1, d.y2 - d.y1) >= 1
-              : d.type === "rect" || d.type === "ellipse"
-                ? Math.abs(d.w) >= 1 || Math.abs(d.h) >= 1
-                : true;
-          if (meaningful) {
-            ownAddsRef.current.add(d.id);
-            dispatch({ type: "add", elements: [cloneDraft(d)] });
+          } else {
+            ownAddsRef.current.add(el.id);
+            dispatch({ type: "add", elements: [el] });
           }
           break;
         }
@@ -1905,13 +1320,13 @@ export function Board({
         case "card": {
           if (!inter.active) {
             // A click (no drag) opens the card.
-            const board = boardById(inter.boardId);
+            const board = kanbanById(elementsRef.current, inter.boardId);
             const found = board ? findCard(board, inter.cardId) : null;
             if (found) openKanban({ mode: "card", boardId: inter.boardId, columnId: found.column.id, cardId: inter.cardId });
             break;
           }
           // Recomputed from the latest boards, in case someone else changed them meanwhile.
-          const moved = cardMoveResult(inter.boardId, inter.cardId, inter.target);
+          const moved = cardMoveResult(elementsRef.current, inter.boardId, inter.cardId, inter.target);
           if (moved) {
             // It glides into its slot from where it was let go.
             const to = inter.target?.boardId ?? inter.boardId;
@@ -1983,20 +1398,6 @@ export function Board({
     setLassoRegion(null);
   };
 
-  const cloneElements = (els: CanvasElement[], offset: number) =>
-    els.map((el) => {
-      const moved = translateElement(el, offset, offset);
-      if (moved.type === "kanban") {
-        // Fresh ids for the copy's columns and cards too, so moving cards between the two boards works.
-        return {
-          ...moved,
-          id: newId(),
-          columns: moved.columns.map((c) => ({ ...c, id: newId(), cards: c.cards.map((k) => ({ ...k, id: newId() })) })),
-        };
-      }
-      return { ...moved, id: newId(), ...("sketch" in moved && moved.sketch ? { sketch: { ...moved.sketch, seed: randomSeed() } } : {}) } as CanvasElement;
-    });
-
   const duplicateSelection = () => {
     const set = new Set(selected);
     const copies = cloneElements(
@@ -2013,17 +1414,77 @@ export function Board({
     const set = new Set(selected);
     const els = elementsRef.current.filter((el) => set.has(el.id));
     if (els.length === 0) return false;
-    clipboardRef.current = els;
-    void navigator.clipboard?.writeText(CLIPBOARD_MARKER + JSON.stringify(els)).catch(() => {});
+    BoardClipboard.shared.copy(els);
     if (cut) deleteSelection();
     return true;
   };
 
+  /** Do what a key asked, if it applies now. */
+  const run = (command: BoardCommand, e: KeyboardEvent) => {
+    const center = { w: viewport.w / 2, h: viewport.h / 2 };
+    switch (command.kind) {
+      case "select-all":
+        e.preventDefault();
+        setSelected(elementsRef.current.filter((el) => el.type !== "eraser").map((el) => el.id));
+        setLassoRegion(null);
+        setTool("select");
+        break;
+      case "duplicate":
+        e.preventDefault();
+        duplicateSelection();
+        break;
+      case "copy":
+        if (copySelection(command.cut)) e.preventDefault();
+        break;
+      case "zoom":
+        e.preventDefault();
+        zoomAt(center.w, center.h, camRef.current.z * command.by);
+        break;
+      case "zoom-reset":
+        e.preventDefault();
+        zoomAt(center.w, center.h, 1);
+        break;
+      case "delete":
+        if (selected.length) {
+          e.preventDefault();
+          deleteSelection();
+        }
+        break;
+      case "escape":
+        if (graphEdit) finishGraphEdit(false);
+        setKanbanEdit(null);
+        setEquation(null);
+        setSelected([]);
+        setLassoRegion(null);
+        setMath(null);
+        break;
+      case "nudge": {
+        if (!selected.length) break;
+        e.preventDefault();
+        const z = camRef.current.z;
+        const set = new Set(selected);
+        const moving = command.alone ? elementsRef.current.filter((el) => set.has(el.id)) : carried(set);
+        dispatch({ type: "update", elements: moving.map((el) => translateElement(el, command.dx / z, command.dy / z)) });
+        break;
+      }
+      case "fit-all":
+        zoomToRect(padRect(contentBounds(elementsRef.current) ?? { x: 0, y: 0, w: 400, h: 300 }, 40), 2);
+        break;
+      case "fit-selection":
+        zoomToRect(selectionBox(selected), 4);
+        break;
+      case "tool":
+        setTool(command.tool);
+        break;
+      case "action":
+        if (command.action === "media") fileInputRef.current?.click();
+        else onTracePicture?.();
+        break;
+    }
+  };
+
   const onKeyDown = useEffectEvent((e: KeyboardEvent) => {
     if (isEditableTarget(e.target)) return;
-    const mod = e.metaKey || e.ctrlKey;
-    const key = e.key.toLowerCase();
-
     if (e.key === " " && !e.repeat) {
       spaceRef.current = true;
       setCursor("grab");
@@ -2031,77 +1492,8 @@ export function Board({
       return;
     }
     if (!ready) return;
-
-    if (mod) {
-      if (readOnly && (key === "d" || key === "x")) return;
-      if (key === "a") {
-        e.preventDefault();
-        setSelected(elementsRef.current.filter((el) => el.type !== "eraser").map((el) => el.id));
-        setLassoRegion(null);
-        setTool("select");
-      } else if (key === "d") {
-        e.preventDefault();
-        duplicateSelection();
-      } else if (key === "c" || key === "x") {
-        if (copySelection(key === "x")) e.preventDefault();
-      } else if (key === "=" || key === "+") {
-        e.preventDefault();
-        zoomAt(viewport.w / 2, viewport.h / 2, camRef.current.z * 1.25);
-      } else if (key === "-") {
-        e.preventDefault();
-        zoomAt(viewport.w / 2, viewport.h / 2, camRef.current.z / 1.25);
-      } else if (key === "0") {
-        e.preventDefault();
-        zoomAt(viewport.w / 2, viewport.h / 2, 1);
-      }
-      return;
-    }
-
-    if (e.key === "Delete" || e.key === "Backspace") {
-      if (selected.length && !readOnly) {
-        e.preventDefault();
-        deleteSelection();
-      }
-      return;
-    }
-    if (e.key === "Escape") {
-      if (graphEdit) finishGraphEdit(false);
-      setKanbanEdit(null);
-      setEquation(null);
-      setSelected([]);
-      setLassoRegion(null);
-      setMath(null);
-      return;
-    }
-    if (e.key.startsWith("Arrow") && selected.length && !readOnly) {
-      e.preventDefault();
-      const step = (e.shiftKey ? 10 : 1) / camRef.current.z;
-      const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
-      const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
-      const set = new Set(selected);
-      const moving = e.altKey ? elementsRef.current.filter((el) => set.has(el.id)) : withFrameContents(set);
-      dispatch({ type: "update", elements: moving.map((el) => translateElement(el, dx, dy)) });
-      return;
-    }
-    if (e.shiftKey && e.key === "!") {
-      zoomToRect(padRect(contentBounds(elementsRef.current) ?? { x: 0, y: 0, w: 400, h: 300 }, 40), 2);
-      return;
-    }
-    if (e.shiftKey && e.key === "@") {
-      zoomToRect(selectionBox(selected), 4);
-      return;
-    }
-    if (e.altKey || e.shiftKey) return;
-    if (key === "i") {
-      if (!readOnly) fileInputRef.current?.click();
-      return;
-    }
-    if (key === TRACE_ACTION.key) {
-      if (!readOnly) onTracePicture?.();
-      return;
-    }
-    const t = TOOLS.find((x) => x.key === key);
-    if (t && (!readOnly || VIEW_TOOLS.includes(t.id))) setTool(t.id);
+    const command = Shortcuts.commandFor(e, readOnly);
+    if (command) run(command, e);
   });
 
   const onKeyUp = useEffectEvent((e: KeyboardEvent) => {
@@ -2116,7 +1508,7 @@ export function Board({
     if (!ready || readOnly || isEditableTarget(e.target)) return;
     const dt = e.clipboardData;
     if (!dt) return;
-    const files = [...dt.files].filter((f) => fileType(f).startsWith("image/") || isVideoType(fileType(f)));
+    const files = [...dt.files].filter(isMediaFile);
     const c = camRef.current;
     const hover = hoverRef.current;
     if (files.length) {
@@ -2125,17 +1517,8 @@ export function Board({
       return;
     }
     const text = dt.getData("text/plain");
-    let els: CanvasElement[] | null = null;
-    if (text.startsWith(CLIPBOARD_MARKER)) {
-      try {
-        els = JSON.parse(text.slice(CLIPBOARD_MARKER.length));
-      } catch {
-        els = null;
-      }
-    } else if (!text && clipboardRef.current.length) {
-      els = clipboardRef.current;
-    }
-    if (els && els.length) {
+    const els = BoardClipboard.shared.read(text);
+    if (els) {
       e.preventDefault();
       const copies = cloneElements(els, 24 / c.z);
       dispatch({ type: "add", elements: copies });
@@ -2199,103 +1582,19 @@ export function Board({
         : unionRects(elements.filter((e) => selected.includes(e.id)).map(elementBounds))
       : null;
 
-  const toolbarPos = (() => {
-    if (!selBox || viewport.w === 0) return null;
-    const tl = { x: (selBox.x - cam.x) * cam.z, y: (selBox.y - cam.y) * cam.z };
-    const w = selBox.w * cam.z;
-    const left = clamp(tl.x + w / 2, 140, viewport.w - 140);
-    const above = tl.y - 56;
-    const top = above > 8 ? above : Math.min(tl.y + selBox.h * cam.z + 12, viewport.h - 56);
-    return { left, top };
-  })();
-
-  const mathPos = (() => {
-    if (!math || viewport.w === 0) return null;
-    const r = math.req.region;
-    const sx = (r.x - cam.x) * cam.z;
-    const sy = (r.y - cam.y) * cam.z;
-    const sw = r.w * cam.z;
-    const cardW = Math.min(352, viewport.w - 24);
-    let left = sx + sw + 16;
-    if (left + cardW > viewport.w - 12) left = sx - cardW - 16;
-    if (left < 12) left = clamp(sx + sw / 2 - cardW / 2, 12, viewport.w - cardW - 12);
-    const top = clamp(sy, 12, Math.max(12, viewport.h - 420));
-    return { left, top };
-  })();
-
-  const equationPos = (() => {
-    if (!equation || viewport.w === 0) return null;
-    const ex = equation.existing;
-    const anchor = ex ? { x: ex.x, y: ex.y + ex.h } : equation.at;
-    const sx = (anchor.x - cam.x) * cam.z;
-    const sy = (anchor.y - cam.y) * cam.z;
-    const width = Math.min(400, viewport.w - 24);
-    const left = clamp(sx - 24, 12, Math.max(12, viewport.w - width - 12));
-    const height = 330;
-    const aboveY = (ex ? (ex.y - cam.y) * cam.z : sy) - height - 16;
-    const top = sy + 16 + height <= viewport.h ? sy + 16 : aboveY >= 12 ? aboveY : clamp(sy + 16, 12, Math.max(12, viewport.h - height - 12));
-    return { left, top };
-  })();
-
-  const graphPos = (() => {
-    if (!graphEdit || viewport.w === 0) return null;
-    const g = graphPreview ?? graphEdit;
-    const width = Math.min(360, viewport.w - 24);
-    const gx = (g.x - cam.x) * cam.z;
-    const gy = (g.y - cam.y) * cam.z;
-    const gw = g.w * cam.z;
-    let left = gx + gw + 16;
-    if (left + width > viewport.w - 12) left = gx - width - 16;
-    if (left < 12) left = viewport.w - width - 12;
-    return { left: Math.max(12, left), top: clamp(gy, 12, Math.max(12, viewport.h - 460)) };
-  })();
-
+  const sized = viewport.w > 0;
+  const toolbarPos = selBox && sized ? selectionToolbarSpot(selBox, cam, viewport) : null;
+  const mathPos = math && sized ? mathCardSpot(math.req.region, cam, viewport) : null;
+  const equationPos = equation && sized ? equationEditorSpot(equation, cam, viewport) : null;
+  const graphPos = graphEdit && sized ? graphEditorSpot(graphPreview ?? graphEdit, cam, viewport) : null;
   const kanbanView = (() => {
-    if (!kanbanEdit || viewport.w === 0) return null;
+    if (!kanbanEdit || !sized) return null;
     const board = elements.find((e) => e.id === kanbanEdit.boardId);
     if (board?.type !== "kanban") return null;
-    const l = kanbanLayout(board);
-    let anchor: Rect = l.title;
-    if (kanbanEdit.mode !== "title") {
-      const col = l.columns.find((c) => c.column.id === kanbanEdit.columnId);
-      if (!col) return null;
-      const card = kanbanEdit.mode === "card" && kanbanEdit.cardId ? col.cards.find((c) => c.card.id === kanbanEdit.cardId) : null;
-      anchor = kanbanEdit.mode === "column" ? col.header : (card?.rect ?? col.add);
-    }
-    const width = Math.min(320, viewport.w - 24);
-    const height = kanbanEdit.mode === "card" ? 200 : kanbanEdit.mode === "column" ? 160 : 112;
-    const left = clamp((anchor.x - cam.x) * cam.z - 8, 12, Math.max(12, viewport.w - width - 12));
-    const top = clamp((anchor.y - cam.y) * cam.z - 8, 12, Math.max(12, viewport.h - height - 12));
-    return { board, style: { left, top } };
+    const spot = kanbanEditorSpot(board, kanbanEdit, cam, viewport);
+    return spot ? { board, style: spot } : null;
   })();
-
-  const editingStyle = (() => {
-    if (!editing) return null;
-    const s = editing.existing ?? style;
-    const fontSize = s.fontSize;
-    const font = "font" in s ? s.font : style.font;
-    const color = s.color;
-    const m = measureText({
-      id: "measure",
-      type: "text",
-      x: 0,
-      y: 0,
-      text: editing.text || " ",
-      color,
-      fontSize,
-      font,
-    });
-    return {
-      left: (editing.x - cam.x) * cam.z,
-      top: (editing.y - cam.y) * cam.z,
-      width: Math.max(m.w * cam.z + fontSize * cam.z, 40),
-      height: m.h * cam.z + 4,
-      fontSize: fontSize * cam.z,
-      lineHeight: TEXT_LINE_HEIGHT,
-      fontFamily: FONT_FAMILIES[font],
-      color,
-    };
-  })();
+  const editingStyle = editing ? textEditorStyle(editing, style, cam) : null;
 
   return (
     <div
@@ -2377,111 +1676,26 @@ export function Board({
       ) : null}
 
       {toolbarPos && selBox ? (
-        <div
-          role="toolbar"
-          aria-label="Selection"
-          className="absolute z-20 flex -translate-x-1/2 items-center gap-1 rounded-xl border bg-card p-1 shadow-float"
-          style={toolbarPos}
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <Button size="sm" className="bg-green hover:bg-green/90" onClick={checkSelection}>
-            <Sparkles /> Check math
-          </Button>
-          {onMakeFlashcard ? (
-            <Button size="sm" variant="ghost" onClick={() => void makeFlashcard()} title="Make a flashcard from this">
-              <GalleryVerticalEnd /> Flashcard
-            </Button>
-          ) : null}
-          {(() => {
-            const el = selected.length === 1 ? elements.find((x) => x.id === selected[0]) : undefined;
-            if (el?.type !== "frame") return null;
-            return (
-              <>
-                {onPresentFrame ? (
-                  <Button size="sm" variant="ghost" onClick={() => onPresentFrame(el.id)} title="Present from this slide">
-                    <Play /> Present
-                  </Button>
-                ) : null}
-                {onOpenFrame && !readOnly ? (
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label="Rename slide"
-                    title="Rename slide"
-                    onClick={() => onOpenFrame(el.id)}
-                  >
-                    <Pencil />
-                  </Button>
-                ) : null}
-              </>
-            );
-          })()}
-          {(() => {
-            if (readOnly) return null;
-            const el = selected.length === 1 ? elements.find((x) => x.id === selected[0]) : undefined;
-            if (el?.type === "kanban") {
-              return (
-                <>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={el.columns.length >= 6}
-                    title={el.columns.length >= 6 ? "Boards have up to 6 columns" : undefined}
-                    onClick={() => dispatch({ type: "update", elements: [addColumn(el, newId())] })}
-                  >
-                    <Columns3 /> Add column
-                  </Button>
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label="Rename board"
-                    title="Rename board"
-                    onClick={() => openKanban({ mode: "title", boardId: el.id })}
-                  >
-                    <Pencil />
-                  </Button>
-                </>
-              );
-            }
-            if (el?.type !== "text" && el?.type !== "math" && el?.type !== "graph") return null;
-            const label = el.type === "text" ? "Edit text" : el.type === "math" ? "Edit equation" : "Edit graph";
-            return (
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label={label}
-                title={label}
-                onClick={() => {
-                  if (el.type === "text") startEditing({ x: el.x, y: el.y }, el);
-                  else if (el.type === "math") openEquation({ x: el.x, y: el.y }, el);
-                  else openGraph(el);
-                }}
-              >
-                <Pencil />
-              </Button>
-            );
-          })()}
-          {(() => {
-            const el = selected.length === 1 ? elements.find((x) => x.id === selected[0]) : undefined;
-            return images && (el?.type === "gif" || el?.type === "video") ? <MediaControls el={el} cache={images} /> : null;
-          })()}
-          {selected.length > 0 && !readOnly ? (
-            <>
-              <Button size="icon-sm" variant="ghost" aria-label="Duplicate" onClick={duplicateSelection}>
-                <Copy />
-              </Button>
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label="Delete selection"
-                className="hover:text-destructive"
-                onClick={deleteSelection}
-              >
-                <Trash2 />
-              </Button>
-            </>
-          ) : null}
-        </div>
+        <SelectionToolbar
+          position={toolbarPos}
+          selected={selected}
+          single={selected.length === 1 ? (elements.find((x) => x.id === selected[0]) ?? null) : null}
+          readOnly={readOnly}
+          images={images}
+          onCheck={checkSelection}
+          onFlashcard={onMakeFlashcard ? () => void makeFlashcard() : undefined}
+          onPresent={onPresentFrame}
+          onRenameFrame={onOpenFrame}
+          onAddColumn={(board) => dispatch({ type: "update", elements: [addColumn(board, newId())] })}
+          onRenameBoard={(board) => openKanban({ mode: "title", boardId: board.id })}
+          onEdit={(el) => {
+            if (el.type === "text") startEditing({ x: el.x, y: el.y }, el);
+            else if (el.type === "math") openEquation({ x: el.x, y: el.y }, el);
+            else if (el.type === "graph") openGraph(el);
+          }}
+          onDuplicate={duplicateSelection}
+          onDelete={deleteSelection}
+        />
       ) : null}
 
       {equation && equationPos ? (
@@ -2551,101 +1765,3 @@ export function Board({
   );
 }
 
-// ------------------------------------------------------------------ utils
-
-const round2 = (v: number) => Math.round(v * 100) / 100;
-
-/** The stroke eraser leaves these alone (delete them with the selection instead). */
-const UNERASABLE = new Set<CanvasElement["type"]>(["image", "gif", "video", "graph", "kanban", "eraser", "frame"]);
-
-/** Corner drags keep these in proportion (Shift to stretch, or for a board: to change only its width). */
-const KEEP_ASPECT = new Set<CanvasElement["type"]>(["image", "gif", "video", "text", "kanban", "frame"]);
-
-/** A to-do card following the pointer, tilted a little, with a shadow. */
-function drawDraggedCard(
-  ctx: CanvasRenderingContext2D,
-  inter: Extract<Interaction, { kind: "card" }>,
-  elements: readonly CanvasElement[],
-) {
-  const board = elements.find((e) => e.id === inter.boardId);
-  if (board?.type !== "kanban") return;
-  const found = findCard(board, inter.cardId);
-  if (!found) return;
-  const box = kanbanLayout(board)
-    .columns.find((c) => c.column.id === found.column.id)
-    ?.cards.find((c) => c.card.id === inter.cardId);
-  if (!box) return;
-  const s = board.scale;
-  const rect = { x: inter.at.x - inter.grab.x, y: inter.at.y - inter.grab.y, w: box.rect.w, h: box.rect.h };
-  const cx = rect.x + rect.w / 2;
-  const cy = rect.y + rect.h / 2;
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate(0.035);
-  ctx.translate(-cx, -cy);
-  ctx.fillStyle = "rgba(32,31,36,0.14)";
-  ctx.beginPath();
-  ctx.roundRect(rect.x + 3 * s, rect.y + 7 * s, rect.w, rect.h, 8 * s);
-  ctx.fill();
-  drawCard(ctx, { card: box.card, rect, lines: box.lines }, s, found.column.color, false);
-  ctx.restore();
-}
-
-/** A detached copy of an in-progress element (new object, new arrays). */
-function cloneDraft(d: CanvasElement): CanvasElement {
-  if (d.type === "stroke") return { ...d, points: [...d.points], ...(d.pressures ? { pressures: [...d.pressures] } : {}) };
-  if (d.type === "eraser") return { ...d, points: [...d.points] };
-  return { ...d };
-}
-
-function corners(b: Rect): [number, number][] {
-  return [
-    [b.x, b.y],
-    [b.x + b.w, b.y],
-    [b.x, b.y + b.h],
-    [b.x + b.w, b.y + b.h],
-  ];
-}
-
-/** Someone else's pointer: an arrow and their name, the same size at any zoom. */
-function drawPeerCursor(ctx: CanvasRenderingContext2D, at: Point, name: string, color: string, px: number) {
-  const arrow = [
-    [0, 0],
-    [0, 17],
-    [4.6, 12.6],
-    [7.6, 19.4],
-    [10.6, 18.1],
-    [7.7, 11.6],
-    [13.6, 11.6],
-  ];
-  ctx.beginPath();
-  arrow.forEach(([x, y], i) => (i ? ctx.lineTo(at.x + x * px, at.y + y * px) : ctx.moveTo(at.x + x * px, at.y + y * px)));
-  ctx.closePath();
-  ctx.fillStyle = color;
-  ctx.fill();
-  ctx.lineWidth = 1.5 * px;
-  ctx.strokeStyle = "#ffffff";
-  ctx.stroke();
-
-  const label = name.length > 24 ? `${name.slice(0, 23)}…` : name;
-  ctx.font = `700 ${12 * px}px "Public Sans Variable", ui-sans-serif, system-ui, sans-serif`;
-  const w = ctx.measureText(label).width + 12 * px;
-  const h = 20 * px;
-  const x = at.x + 12 * px;
-  const y = at.y + 19 * px;
-  ctx.beginPath();
-  ctx.roundRect(x, y, w, h, 6 * px);
-  ctx.fillStyle = color;
-  ctx.fill();
-  ctx.fillStyle = "#ffffff";
-  ctx.textBaseline = "middle";
-  ctx.textAlign = "left";
-  ctx.fillText(label, x + 6 * px, y + h / 2 + 0.5 * px);
-}
-
-function tracePolygon(ctx: CanvasRenderingContext2D, poly: readonly Point[]) {
-  ctx.beginPath();
-  ctx.moveTo(poly[0].x, poly[0].y);
-  for (const p of poly.slice(1)) ctx.lineTo(p.x, p.y);
-  ctx.closePath();
-}

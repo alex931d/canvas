@@ -552,8 +552,8 @@ Decorations for Easter, Halloween and Christmas on the landing and pricing pages
   pages, or in the account menu in the app. It's remembered in that browser.
 - **Out of the way**: nothing seasonal takes a click, nothing moves for people who've asked their
   system for reduced motion (the decorations stay still), the snow and petals pause in background tabs,
-  and in the editor the menu keeps its decorations but nothing falls next to the drawing. On phones,
-  where the menu is a bottom bar, only the striped edge shows.
+  and the editor has no menu, so nothing seasonal sits or falls next to the drawing. On phones, where
+  the menu is a bottom bar, only the striped edge shows.
 
 ## Equations, graphs and chemistry
 
@@ -709,8 +709,17 @@ How it works (`src/lib/collab`):
   or repeat a change. Editors that fall behind the kept history (2,000 changes per drawing) reload
   the drawing.
 - Cursors and selections travel the same way but aren't stored, and only while someone else is
-  there (below). Undo and redo only reverse your own changes, and skip anything someone else has
-  changed since.
+  there (below). Each cursor carries the person's **profile picture** (or their initials, in their
+  colour) and name, the same size at any zoom. Undo and redo only reverse your own changes, and skip
+  anything someone else has changed since.
+- **Every stroke shows as it's drawn.** While you hold the pen (or drag a shape, a frame, a graph or
+  the pixel eraser), what you're drawing goes out with your cursor, and everyone else's board draws it
+  growing, in your colour and brush. Pen strokes go in pieces (only the points since the last piece,
+  at most 600 coordinates each, so a message stays well under the bus's 8 kB); shapes go whole. Pieces
+  are sent one after another, so they arrive in order; one that doesn't follow on is skipped. When you
+  lift the pen, the finished stroke arrives the usual way, with the same id: the preview gives way to
+  it without a gap, and without playing its entrance again. Previews are never stored
+  (`src/lib/collab/peer-drafts.ts`: `DraftOutbox` sends, `PeerDrafts` puts them back together).
 - Viewers can look, follow along, check math and make flashcards; the server refuses their changes.
   Removing someone or deleting the drawing ends their live view at once.
 
@@ -1052,8 +1061,10 @@ settings sections.
   draws, so pages never open with the full menu and then slide. The staff-only **Admin** link isn't in
   the phones' bar (it would arrive late and push the other tabs aside); staff open it from the account
   menu there.
-- **The editor's header** keeps room for the title: on phones, Share, Export and Chemistry are in a
-  **⋯** menu. **New Drawing** reads **New** on the narrowest phones (still "New Drawing" to screen
+- **The editor** has no menu down the side: the board gets the whole width, and the tools are a dock
+  floating at the bottom of it (see [Choosing tools](#choosing-tools)), with the zoom controls above
+  it on screens narrower than 64rem so the two never overlap. The header keeps room for the title: on
+  phones, Share, Export and Chemistry are in a **⋯** menu, and your account is at its end. **New Drawing** reads **New** on the narrowest phones (still "New Drawing" to screen
   readers).
 - **Layouts follow the space they get**, not the screen: the Settings cards use container queries
   (`@container`), since next to the menu a tablet's column is narrower than a phone held sideways.
@@ -1062,6 +1073,26 @@ settings sections.
 - **Loading placeholders** have the real content's sizes (the page header's avatar, the gallery's
   tiles, the Settings cards at each width, the membership card, the whole admin frame), so nothing
   jumps when the page fills in.
+
+## Choosing tools
+
+The tools sit in a **dock** at the bottom of the board, in six slots, so it never needs scrolling
+however many tools there are:
+
+- **Select** (with Lasso and Pan), **Pen**, **Eraser**, **Shapes** (rectangle, ellipse, line,
+  arrow), **Text**, and **Insert** (equation, graph, to-do board, frame, image or video, trace a
+  picture), then **Undo**, **Redo** and **Find a tool**.
+- A slot with several tools shows the last one you used: press it to use that again; press it again,
+  or the little arrow on its corner, for the others (with their keys). Picking a tool by its key moves
+  the dock along too.
+- **Find a tool** (**/** or **Ctrl/⌘ K**) finds any tool or command by typing part of its name, or a
+  word for it ("circle" finds the ellipse, "slide" the frame): ↑ ↓ to choose, Enter to use it. It also
+  reaches Undo, Check math, Slides, Present, Chemistry, Share, Export and Clear board.
+- View-only collaborators get Select, Lasso and Pan.
+
+Every tool, its key, icon, the words the search knows it by and how the dock groups them live in one
+place, `ToolRegistry` in `src/components/editor/tools.ts`, which the dock, the search and the board's
+keys all read.
 
 ## Keyboard
 
@@ -1078,6 +1109,7 @@ settings sections.
 | U | Trace a picture into strokes | F | Frame (a slide); Alt+drag moves a frame alone |
 | K | To-do board | Shift + corner drag | Stretch; widen a to-do board |
 | Shift while drawing | Square, circle, 45° lines | Shift 1 / Shift 2 | Zoom to fit / selection |
+| / or Ctrl/⌘ K | Find a tool or command by name | | |
 
 On `/study`: **Space** shows the answer, then **1**, **2** or **3** for Again, Good or Easy.
 
@@ -1128,7 +1160,7 @@ src/
     api/buddy/battle             POST: start a battle or play a turn (played on the server)
     api/avatars/[userId]         GET a profile picture (signed in; cached privately per version)
   components/
-    app-sidebar.tsx              dark sidebar (tools in the editor): bottom bar on phones, icon rail on tablets
+    app-sidebar.tsx              dark sidebar: bottom bar on phones, icon rail on tablets (not in the editor)
     user-menu.tsx                avatar + account menu (Study buddies, Settings, Membership, Sign out)
     motion/                      Reveal (slide in and out on scroll) and MotionProvider (reduced motion)
     settings/                    profile (picture and name) and effects, with their live examples
@@ -1149,7 +1181,20 @@ src/
                                  decorations, the mode and the "hide" preference
     landing/                     the landing page's animated opening scene and editor screenshot
     billing/membership-buttons   Start membership, Manage billing, Log out
-    editor/board.tsx             the infinite canvas: camera, rendering loop, pointer/touch, tools
+    editor/tool-dock.tsx         the tools, grouped in a dock at the bottom of the board
+    editor/tool-search.tsx       find a tool or command by name (/ or ⌘K)
+    editor/tools.ts              ToolRegistry: every tool, its key, icon, words, and the dock's groups
+    editor/board/                the infinite canvas, in parts:
+      board.tsx                  the component: pointer and touch, keys, text and editors, the floating UI
+      camera.ts                  Camera (where the view is; immutable) and CameraMemory (per drawing, per device)
+      drafts.ts                  DraftSession: a stroke or shape while it's drawn, and what it becomes
+      painter.ts                 BoardPainter: paints at most once a frame; holds the scene while you draw
+      overlays.ts                selection, lasso, marquee, eraser ring, peers' cursors (PeerCursors) and selections
+      frames.ts, kanban-drag.ts  frames' titles and contents; where a dragged to-do card lands
+      capture.ts, media.ts       pictures for Check math and flashcards; MediaImporter for files and traced strokes
+      clipboard.ts               BoardClipboard: one per tab, so copies paste into other drawings
+      shortcuts.ts               Shortcuts: which key does what (a pure mapping to commands)
+      placement.ts               where floating editors and the selection bar go on screen
     editor/canvas-editor.tsx     editor shell: local-first saving, live sync, presence, header, export
     editor/style-bar.tsx         per-tool options (brush, colour, width, sketchy, font)
     editor/math-card.tsx         AI result card (KaTeX)
@@ -1476,6 +1521,15 @@ Google, it checks the client secret, the redirect URI and the PKCE verifier. `GO
   cancelled one), editors drawing and viewers refused by the server, role changes and removal
   reaching open drawings live, what admins may and may not change, the not-open-to-you page, moving
   drawings in and out, renaming, leaving, and deleting it giving drawings back to their makers.
+- `e2e/test-live.mjs` (14 checks): drawing together live. Her profile picture by her cursor on his
+  board; her pen stroke on his board while she's still drawing, not yet part of the drawing, growing,
+  then landing without a gap or double; a rectangle as she drags it; his strokes reaching her as he
+  draws, with his initials; and only finished elements saved.
+- `e2e/test-dock.mjs` (31 checks): the tool dock and search. Six slots holding every tool in one row;
+  a group's arrow listing its tools, the slot remembering the last one, a second press opening it,
+  keys moving the dock along, Insert's list, Undo and Redo; the search (/ and ⌘K, other words,
+  Enter, ↓, commands, nothing found, Esc, its button); view-only members' three tools; a phone where
+  the dock fits, clear of the zoom controls, and a second tap opens a group.
 - `e2e/test-frames.mjs` (55 checks): frames and presenting. The Frame tool (F) in 16:9 and square, a
   click for a view-sized frame, New slide around a selection; moving a frame by its title takes what's
   wholly inside (Alt: the frame alone), clicks inside reach what's drawn there, the eraser leaves frames;

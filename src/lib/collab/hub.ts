@@ -105,7 +105,17 @@ class Hub {
         void this.deliver(msg.d);
         break;
       case "presence": {
-        const presence = { c: msg.c, u: msg.u, n: msg.n, a: msg.a ?? null, cur: msg.cur, sel: msg.sel, hello: msg.hello, bye: msg.bye };
+        const presence = {
+          c: msg.c,
+          u: msg.u,
+          n: msg.n,
+          a: msg.a ?? null,
+          cur: msg.cur,
+          sel: msg.sel,
+          dr: msg.dr,
+          hello: msg.hello,
+          bye: msg.bye,
+        };
         for (const s of subs) if (s.clientId !== msg.c) s.send("presence", presence);
         break;
       }

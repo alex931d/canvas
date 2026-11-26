@@ -4,7 +4,9 @@
 // to-do board layout and card moves, byte ranges for video, the schemas,
 // the study buddies' levels, streaks and lines, the seasonal themes' dates,
 // tracing pictures into strokes, frames as slides (order, what a frame
-// carries, the journey's camera path), and who may do what in a team workspace.
+// carries, the journey's camera path), who may do what in a team workspace,
+// and the board's own parts (the camera, drawing a stroke or shape, keys,
+// the clipboard, the tool registry).
 //   npm run test:unit
 import { balanceEquation } from "../src/lib/chem/balance";
 import { ELEMENTS } from "../src/lib/chem/elements";
@@ -12,6 +14,14 @@ import { molarMass, parseSpecies, speciesToMhchem, speciesToText } from "../src/
 import { elementBox, hitTest, insideFrame, scaleElement, slidesOf } from "../src/lib/canvas/geometry";
 import { cameraFor, flight, journeyVeil, reorderSlides, slideRect } from "../src/lib/canvas/present";
 import { assignableRoles, canManageMember, drawingRoleFrom } from "../src/lib/workspaces/roles";
+import { Camera } from "../src/components/editor/board/camera";
+import { BoardClipboard, cloneElements } from "../src/components/editor/board/clipboard";
+import { DraftSession } from "../src/components/editor/board/drafts";
+import { frameBox, nextSlide, withFrameContents } from "../src/components/editor/board/frames";
+import { Shortcuts } from "../src/components/editor/board/shortcuts";
+import { DraftOutbox, MAX_PIECE_COORDS, PeerDrafts } from "../src/lib/collab/peer-drafts";
+import { initials } from "../src/components/editor/board/avatars";
+import { DEFAULT_STYLE, ToolRegistry } from "../src/components/editor/tools";
 import {
   addColumn,
   dropSlot,
@@ -873,6 +883,138 @@ eq(
   eq("but not other admins, or the owner", [canManageMember("admin", "admin"), canManageMember("admin", "owner")], [false, false]);
   eq("editors manage nobody, not even viewers", canManageMember("editor", "viewer"), false);
   eq("nobody manages the owner", canManageMember("owner", "owner"), false);
+}
+
+// ------------------------------------------------------------ the board's parts
+{
+  const cam = new Camera(100, 50, 2);
+  eq("the camera maps screen to world", cam.toWorld(20, 10), { x: 110, y: 55 });
+  eq("and back", cam.toScreen({ x: 110, y: 55 }), { x: 20, y: 10 });
+  const zoomed = cam.zoomedAt(200, 100, 4);
+  eq("zooming keeps the point under the pointer", zoomed.toWorld(200, 100), cam.toWorld(200, 100));
+  eq("zoom stops at 800%", new Camera(0, 0, 50).z, 8);
+  eq("and at 10%", cam.zoomedAt(0, 0, 0.001).z, 0.1);
+  eq("panning moves by screen pixels", cam.panned(40, -20).toWorld(0, 0), { x: 120, y: 40 });
+  const fit = Camera.fitting({ x: 0, y: 0, w: 1000, h: 500 }, { w: 1200, h: 800 }, 4);
+  near("fitting fills 85% of the width", fit.z, (1200 * 0.85) / 1000);
+  eq("centred", fit.center({ w: 1200, h: 800 }), { x: 500, y: 250 });
+  const beside = Camera.fitting({ x: 0, y: 0, w: 1000, h: 500 }, { w: 1200, h: 800 }, 4, 400);
+  near("beside a panel it fits what's left", beside.z, (800 * 0.85) / 1000);
+  const pinch = cam.pinched({ x: 0, y: 0 }, 100, { x: 0, y: 0 }, 200);
+  eq("spreading two fingers zooms in around them", [pinch.z, pinch.toWorld(0, 0)], [4, cam.toWorld(0, 0)]);
+  eq("a saved camera reads back", Camera.parse(JSON.parse(JSON.stringify(cam))), cam);
+  eq("anything else doesn't", [Camera.parse({ x: 1, y: "2", z: 1 }), Camera.parse(null)], [null, null]);
+
+  const slide = () => ({ title: "Slide 1", order: 1 });
+  const pen = DraftSession.start("pen", { x: 0, y: 0 }, DEFAULT_STYLE, { slide })!;
+  pen.addSamples([{ x: 0.1, y: 0 }, { x: 5, y: 0 }, { x: 10, y: 3 }], 1);
+  const stroke = pen.finish(1, () => ({ x: 0, y: 0, w: 1, h: 1 }));
+  eq("a pen stroke skips samples closer than a step", stroke?.type === "stroke" ? stroke.points : null, [0, 0, 5, 0, 10, 3]);
+  const snap = pen.snapshot();
+  pen.addSamples([{ x: 20, y: 20 }], 1);
+  eq("a snapshot doesn't change as the stroke goes on", snap.type === "stroke" && snap.points.length, 6);
+  const long = DraftSession.start("pen", { x: 0, y: 0 }, DEFAULT_STYLE, { slide })!;
+  const samples = Array.from({ length: 20_005 }, (_, i) => ({ x: i + 1, y: 0 }));
+  const cut = long.addSamples(samples, 0.5);
+  eq("a very long stroke is cut, and carries on", [cut?.type, long.draft.type === "stroke" && long.draft.points.length < 100], ["stroke", true]);
+  eq("the whole-stroke eraser has no draft", DraftSession.start("eraser", { x: 0, y: 0 }, DEFAULT_STYLE, { slide }), null);
+  const rect = DraftSession.start("rect", { x: 10, y: 10 }, DEFAULT_STYLE, { slide })!;
+  rect.reshape({ x: 40, y: 20 }, true, "16:9");
+  eq("Shift keeps rectangles square", rect.draft.type === "rect" && [rect.draft.w, rect.draft.h], [30, 30]);
+  const line = DraftSession.start("line", { x: 0, y: 0 }, DEFAULT_STYLE, { slide })!;
+  line.reshape({ x: 10, y: 1 }, true, "16:9");
+  eq("and lines on 45° steps", line.draft.type === "line" && line.draft.y2, 0);
+  const dot = DraftSession.start("rect", { x: 10, y: 10 }, DEFAULT_STYLE, { slide })!;
+  eq("a click with a shape tool draws nothing", dot.finish(1, () => ({ x: 0, y: 0, w: 1, h: 1 })), null);
+  const frame = DraftSession.start("frame", { x: 0, y: 0 }, DEFAULT_STYLE, { slide })!;
+  frame.reshape({ x: 160, y: 10 }, false, "16:9");
+  eq("frames keep their shape while drawn", frame.draft.type === "frame" && [frame.draft.w, frame.draft.h], [160, 90]);
+  const clicked = DraftSession.start("frame", { x: 0, y: 0 }, DEFAULT_STYLE, { slide })!;
+  const placed = clicked.finish(1, () => ({ x: -50, y: -25, w: 100, h: 50 }));
+  eq("a click places a frame where it's told", placed?.type === "frame" && [placed.x, placed.w, placed.title], [-50, 100, "Slide 1"]);
+  const graph = DraftSession.start("graph", { x: 0, y: 0 }, DEFAULT_STYLE, { slide })!;
+  const g = graph.finish(2, () => ({ x: 0, y: 0, w: 1, h: 1 }));
+  eq("a click with the graph tool makes one 480 × 320 on screen", g?.type === "graph" && [g.w, g.h], [240, 160]);
+
+  const box = frameBox({ x: 0, y: 0 }, { x: 0, y: 0, w: 100, h: 100 }, "16:9", { w: 1000, h: 800 }, 1);
+  near("a frame around something takes the frame shape", box.w / box.h, 16 / 9, 0.01);
+  const viewFrame = frameBox({ x: 500, y: 400 }, null, "1:1", { w: 1000, h: 800 }, 1);
+  eq("a clicked frame is most of the view, centred", [viewFrame.w, viewFrame.h, viewFrame.x + viewFrame.w / 2], [480, 480, 500]);
+  const f1: CanvasElement = { id: "f", type: "frame", x: 0, y: 0, w: 100, h: 100, title: "Intro", order: 3.5 };
+  const inside: CanvasElement = { id: "i", type: "rect", color: "#000", size: 2, fill: null, x: 10, y: 10, w: 20, h: 20 };
+  eq("new slides go after the last", nextSlide([f1]), { title: "Slide 2", order: 4 });
+  eq("frames carry what's inside", withFrameContents([f1, inside], new Set(["f"])).map((e) => e.id), ["f", "i"]);
+
+  const keys = (key: string, mods: Partial<KeyboardEvent> = {}) =>
+    ({ key, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...mods }) as KeyboardEvent;
+  eq("P picks the pen", Shortcuts.commandFor(keys("p"), false), { kind: "tool", tool: "pen" });
+  eq("but not when viewing only", Shortcuts.commandFor(keys("p"), true), null);
+  eq("viewers can still lasso", Shortcuts.commandFor(keys("s"), true), { kind: "tool", tool: "lasso" });
+  eq("I adds a picture", Shortcuts.commandFor(keys("i"), false), { kind: "action", action: "media" });
+  eq("⌘D duplicates", Shortcuts.commandFor(keys("d", { metaKey: true }), false), { kind: "duplicate" });
+  eq("viewers can copy but not cut", [Shortcuts.commandFor(keys("c", { ctrlKey: true }), true)?.kind, Shortcuts.commandFor(keys("x", { ctrlKey: true }), true)], ["copy", null]);
+  eq("Shift+arrow nudges ten pixels", Shortcuts.commandFor(keys("ArrowLeft", { shiftKey: true }), false), { kind: "nudge", dx: -10, dy: 0, alone: false });
+  eq("Alt+arrow moves a frame alone", Shortcuts.commandFor(keys("ArrowUp", { altKey: true }), false), { kind: "nudge", dx: 0, dy: -1, alone: true });
+  eq("Shift+1 fits everything", Shortcuts.commandFor(keys("!", { shiftKey: true }), false), { kind: "fit-all" });
+
+  const registry = ToolRegistry.shared;
+  eq("one registry for the app", registry === ToolRegistry.shared, true);
+  eq("every tool is in a dock group", registry.tools.every((t) => registry.groupOf(t.id)), true);
+  eq("and every action", registry.actions.every((a) => registry.groupOf(a.id)), true);
+  eq("keys are unique", new Set([...registry.tools, ...registry.actions].map((t) => t.key)).size, registry.tools.length + registry.actions.length);
+
+  const clip = BoardClipboard.shared;
+  eq("one clipboard for the tab", clip === BoardClipboard.shared, true);
+  eq("ordinary text isn't copied elements", clip.read("hello"), null);
+  eq("copied elements come back from their text", clip.read("canvas-elements:v1:" + JSON.stringify([inside]))?.[0]?.id, "i");
+  const copies = cloneElements([inside], 10);
+  eq("pasted copies get new ids, moved", [copies[0].id !== "i", copies[0].type === "rect" && copies[0].x], [true, 20]);
+}
+
+// ------------------------------------------------------------ strokes shared as they're drawn
+{
+  const out = new DraftOutbox();
+  const inbox = new PeerDrafts();
+  eq("nothing to send when not drawing", out.take(), undefined);
+  const live: CanvasElement = { id: "s1", type: "stroke", color: "#000", size: 4, points: [0, 0, 1, 1], pressures: [0.5, 0.6] };
+  out.set(live);
+  const p1 = out.take()!;
+  eq("the first piece starts at 0", [p1.from, p1.el.type === "stroke" && p1.el.points], [0, [0, 0, 1, 1]]);
+  eq("then nothing until it grows", out.take(), undefined);
+  if (live.type === "stroke") {
+    live.points.push(2, 2, 3, 3);
+    live.pressures!.push(0.7, 0.8);
+  }
+  const p2 = out.take()!;
+  eq("then only the new points", [p2.from, p2.el.type === "stroke" && p2.el.points, p2.el.type === "stroke" && p2.el.pressures], [4, [2, 2, 3, 3], [0.7, 0.8]]);
+  inbox.apply("tab", p1);
+  const joined = inbox.apply("tab", p2);
+  eq("the other side puts it back together", joined?.type === "stroke" && [joined.points, joined.pressures], [[0, 0, 1, 1, 2, 2, 3, 3], [0.5, 0.6, 0.7, 0.8]]);
+  eq("a piece that doesn't follow on is ignored", inbox.apply("tab", { from: 20, el: { ...live, points: [9, 9] } })?.type === "stroke" && (inbox.apply("tab", undefined) as { points: number[] }).points.length, 8);
+  const big: CanvasElement = { id: "s2", type: "stroke", color: "#000", size: 4, points: Array.from({ length: 1500 }, (_, i) => i) };
+  out.set(big);
+  const first = out.take()!;
+  eq("long strokes go in pieces small enough for the bus", [first.from, first.el.type === "stroke" && first.el.points.length], [0, MAX_PIECE_COORDS]);
+  eq("and the rest is still waiting", out.pending, true);
+  out.set(null);
+  eq("lifting the pointer sends null once", [out.take(), out.take()], [null, undefined]);
+  const shape: CanvasElement = { id: "r", type: "rect", color: "#000", size: 2, fill: null, x: 0, y: 0, w: 10, h: 10 };
+  out.set(shape);
+  eq("shapes go whole", out.take()?.el.type, "rect");
+  eq("and again only when they change", out.take(), undefined);
+  if (shape.type === "rect") shape.w = 20;
+  eq("like this", out.take()?.el.type === "rect", true);
+
+  inbox.apply("tab", null, 1000);
+  eq("a finished draft stays a moment, until it lands", inbox.visible(() => false, 1500).length, 1);
+  eq("and goes once it has", inbox.visible((id) => id === "s1", 1600).length, 0);
+  inbox.apply("other", { from: 0, el: shape }, 0);
+  inbox.apply("other", null, 0);
+  eq("or after a moment if it never does", inbox.visible(() => false, 2000).length, 0);
+  inbox.apply("gone", { from: 0, el: shape }, 0);
+  eq("drafts left behind mid-stroke go after 30 s", inbox.visible(() => false, 31_000).length, 0);
+
+  eq("initials for people without a picture", [initials("Maya Chen"), initials("cher"), initials("  ")], ["MC", "CH", "?"]);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

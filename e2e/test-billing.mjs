@@ -8,7 +8,7 @@ import Stripe from "stripe";
 import nextEnv from "@next/env";
 
 nextEnv.loadEnvConfig(process.cwd());
-const { BASE, sleep, sql, signUp, uniqueEmail } = await import("./helpers.mjs");
+const { BASE, sleep, sql, signUp, uniqueEmail, pickTool } = await import("./helpers.mjs");
 
 const CHROME = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 const MOCK = process.env.MOCK_STRIPE_URL ?? "http://localhost:12111";
@@ -191,7 +191,7 @@ async function stroke(dx) {
     const r = c.getBoundingClientRect();
     return { x: r.x, y: r.y, w: r.width, h: r.height };
   });
-  await page.click("aside button[aria-label='Pen']");
+  await pickTool(page, "Pen");
   await page.mouse.move(b.x + 200 + dx, b.y + 200);
   await page.mouse.down();
   for (let i = 1; i <= 12; i++) await page.mouse.move(b.x + 200 + dx + i * 12, b.y + 200 + (i % 2) * 14, { steps: 2 });

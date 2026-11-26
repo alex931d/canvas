@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import nextEnv from "@next/env";
 
 nextEnv.loadEnvConfig(process.cwd());
-const { signUp, localDbName } = await import("./helpers.mjs");
+const { signUp, localDbName, pickTool } = await import("./helpers.mjs");
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 const CHROME = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
@@ -67,7 +67,7 @@ async function drag(pts, { steps = 6, shift = false } = {}) {
   await page.mouse.up();
   if (shift) await page.keyboard.up("Shift");
 }
-const tool = (label) => page.click(`aside button[aria-label='${label}']`);
+const tool = (label) => pickTool(page, label);
 const colour = (name) => page.click(`[aria-label='Colour'] button[aria-label='${name}']`);
 const elementsIn = (id) => JSON.parse(sql(`select data->'elements' from drawings where id='${id}'`) || "[]");
 async function waitFor(fn, timeout = 8000) {

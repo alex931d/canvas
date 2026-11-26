@@ -12,7 +12,7 @@ import { join } from "node:path";
 import nextEnv from "@next/env";
 
 nextEnv.loadEnvConfig(process.cwd());
-const { sleep, sql, signUp } = await import("./helpers.mjs");
+const { sleep, sql, signUp, pickTool } = await import("./helpers.mjs");
 
 const CHROME = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 let failures = 0;
@@ -129,7 +129,7 @@ const button = (label) => `xpath/.//*[@role='dialog']//button[normalize-space()=
 await page.keyboard.press("p");
 await page.click("[role=group][aria-label=Colour] button[aria-label=Blue]");
 
-check("the sidebar has Trace a picture", (await page.$("aside button[aria-label^='Trace a picture']")) !== null);
+check("the dock has Trace a picture", (await page.$("[data-testid=tool-dock] [data-items*='Trace a picture']")) !== null);
 const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 5000 }), page.keyboard.press("u")]);
 check("U opens the picture chooser, for pictures only", !chooser.isMultiple() && (await page.$eval("[data-testid=trace-input]", (i) => i.accept)) === "image/*");
 await chooser.accept([mathFile]);
@@ -231,7 +231,7 @@ await page.keyboard.up("Control");
 await waitFor(async () => (await items()) === after);
 
 // ---------------------------------------------------------------- blackboard chemistry
-const [chooser2] = await Promise.all([page.waitForFileChooser(), page.click("aside button[aria-label^='Trace a picture']")]);
+const [chooser2] = await Promise.all([page.waitForFileChooser(), pickTool(page, "Trace a picture")]);
 await chooser2.accept([chemFile]);
 await page.waitForSelector("[data-testid=trace-box]");
 await settled();
@@ -275,8 +275,8 @@ phone.on("pageerror", (e) => errors.push(e.message));
 await signUp(phone, { name: "Trace Phone" });
 await Promise.all([phone.waitForNavigation({ waitUntil: "load" }), phone.click("main form button[type=submit]")]);
 await phone.waitForFunction(() => /^\/drawings\//.test(location.pathname), { timeout: 15_000 });
-await phone.waitForSelector("button[aria-label^='Trace a picture']", { timeout: 10_000 });
-const [chooser5] = await Promise.all([phone.waitForFileChooser(), phone.click("button[aria-label^='Trace a picture']")]);
+await phone.waitForSelector("[data-testid=tool-dock]", { timeout: 10_000 });
+const [chooser5] = await Promise.all([phone.waitForFileChooser(), pickTool(phone, "Trace a picture")]);
 await chooser5.accept([mathFile]);
 await phone.waitForSelector("[data-testid=trace-box]");
 await waitFor(async () => /^\d+ strokes?/.test(await phone.$eval("[role=dialog] [role=status]", (n) => n.textContent)));

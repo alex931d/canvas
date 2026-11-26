@@ -141,6 +141,8 @@ export function Toaster({ className }: { className?: string }) {
       aria-label="Notifications"
       className={cn(
         "pointer-events-none fixed inset-x-0 bottom-4 z-[70] max-md:bottom-[84px] flex justify-center px-4",
+        // Above the editor's tool dock (it marks <html> with data-dock while open).
+        "[html[data-dock]_&]:bottom-[96px]",
         className,
       )}
     >
