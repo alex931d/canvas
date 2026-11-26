@@ -110,7 +110,7 @@ class Hub {
         break;
       }
       case "meta":
-        for (const s of subs) s.send("meta", { title: msg.title });
+        for (const s of subs) s.send("meta", { title: msg.title, presentation: msg.presentation });
         break;
       case "deleted":
         for (const s of [...subs]) {

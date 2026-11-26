@@ -323,6 +323,11 @@ export const drawings = pgTable(
      * version 1 format, so it's typed `unknown` and normalized on read.
      */
     data: jsonb("data").$type<unknown>().notNull(),
+    /**
+     * How its frames are presented (see presentationSchema in
+     * src/lib/canvas/schema.ts); null until someone picks a style.
+     */
+    presentation: jsonb("presentation").$type<unknown>(),
     /** Small image data URL shown in the gallery. */
     thumbnail: text("thumbnail"),
     /**

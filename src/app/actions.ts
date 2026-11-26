@@ -8,7 +8,7 @@ import { db } from "@/db";
 import { drawings } from "@/db/schema";
 import { getCurrentSession, requireUser } from "@/lib/auth/session";
 import { getMembership, requireMember } from "@/lib/billing/membership";
-import { emptyDrawing, titleSchema } from "@/lib/canvas/schema";
+import { emptyDrawing, presentationSchema, titleSchema } from "@/lib/canvas/schema";
 import { canEdit, getRole } from "@/lib/collab/access";
 import { notify } from "@/lib/collab/notify";
 
@@ -69,6 +69,32 @@ export async function renameDrawing(id: string, title: string): Promise<SaveResu
 
   if (!row) return { ok: false, error: "Drawing not found" };
   await notify({ t: "meta", d: parsedId.data, title: parsedTitle.data });
+  return { ok: true, updatedAt: row.updatedAt.toISOString() };
+}
+
+/** Owners and editors pick how the frames are presented; everyone looking at it gets the change. */
+export async function savePresentation(id: string, presentation: unknown): Promise<SaveResult> {
+  const { user } = await getCurrentSession();
+  if (!user) return SIGNED_OUT;
+  if (!(await getMembership(user.id)).isMember) return MEMBERSHIP_ENDED;
+
+  const parsedId = idSchema.safeParse(id);
+  const parsed = presentationSchema.safeParse(presentation);
+  if (!parsedId.success) return { ok: false, error: "Invalid drawing id" };
+  if (!parsed.success) return { ok: false, error: "That isn't a presentation style." };
+
+  const role = await getRole(parsedId.data, user.id);
+  if (!role) return { ok: false, error: "Drawing not found" };
+  if (!canEdit(role)) return { ok: false, error: "You can view this drawing but not change how it's presented." };
+
+  const [row] = await db
+    .update(drawings)
+    .set({ presentation: parsed.data })
+    .where(eq(drawings.id, parsedId.data))
+    .returning({ updatedAt: drawings.updatedAt });
+
+  if (!row) return { ok: false, error: "Drawing not found" };
+  await notify({ t: "meta", d: parsedId.data, presentation: parsed.data });
   return { ok: true, updatedAt: row.updatedAt.toISOString() };
 }
 

@@ -3,6 +3,7 @@ import {
   FONT_FAMILIES,
   TEXT_LINE_HEIGHT,
   type CanvasElement,
+  type FrameElement,
   type TextElement,
 } from "./schema";
 
@@ -152,6 +153,7 @@ export function elementBox(el: CanvasElement): Rect {
     case "video":
     case "math":
     case "graph":
+    case "frame":
       return { x: el.x, y: el.y, w: el.w, h: el.h };
     case "kanban": {
       const l = kanbanLayout(el);
@@ -161,8 +163,8 @@ export function elementBox(el: CanvasElement): Rect {
 }
 
 /** Elements drawn as a box: no stroke width around them. */
-const BOXED = new Set<CanvasElement["type"]>(["text", "image", "gif", "video", "math", "graph", "kanban"]);
-type Boxed = Extract<CanvasElement, { type: "text" | "image" | "gif" | "video" | "math" | "graph" | "kanban" }>;
+const BOXED = new Set<CanvasElement["type"]>(["text", "image", "gif", "video", "math", "graph", "kanban", "frame"]);
+type Boxed = Extract<CanvasElement, { type: "text" | "image" | "gif" | "video" | "math" | "graph" | "kanban" | "frame" }>;
 const isBoxed = (el: CanvasElement): el is Boxed => BOXED.has(el.type);
 
 /** Visual bounds including stroke width; used for culling and selection. */
@@ -231,7 +233,25 @@ export function hitTest(el: CanvasElement, p: Point, tol: number): boolean {
     case "graph":
     case "kanban":
       return pointInRect(p, padRect(elementBox(el), tol));
+    case "frame": {
+      // Only its edge: what's drawn inside a frame stays clickable. (Its title is hit in the board.)
+      const r = elementBox(el);
+      return pointInRect(p, padRect(r, tol)) && !pointInRect(p, padRect(r, -tol));
+    }
   }
+}
+
+/** The frames' slides in order (lowest `order` first; ties by position on the canvas). */
+export function slidesOf(elements: readonly CanvasElement[]): FrameElement[] {
+  return elements
+    .filter((e): e is FrameElement => e.type === "frame")
+    .sort((a, b) => a.order - b.order || a.y - b.y || a.x - b.x);
+}
+
+/** What a frame carries along when it moves: everything (frames too) wholly inside it. */
+export function insideFrame(elements: readonly CanvasElement[], frame: FrameElement): CanvasElement[] {
+  const box = elementBox(frame);
+  return elements.filter((e) => e.id !== frame.id && e.type !== "eraser" && rectContainsRect(box, elementBounds(e)));
 }
 
 /** Topmost element under the point (last drawn wins). */
@@ -324,6 +344,7 @@ export function scaleElement<T extends CanvasElement>(el: T, from: Rect, to: Rec
     case "image":
     case "gif":
     case "video":
+    case "frame":
       return { ...el, x: mx(el.x), y: my(el.y), w: Math.max(1, r1(el.w * sx)), h: Math.max(1, r1(el.h * sy)) };
     case "kanban": {
       // Corner drags scale the whole board; with Shift (sx ≠ sy) only the

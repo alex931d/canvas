@@ -13,7 +13,7 @@ import {
 } from "@/components/kit";
 import type { Brush as BrushKind, FontKind, Sketch } from "@/lib/canvas/schema";
 import { cn } from "@/lib/utils";
-import { SWATCHES, isShapeTool, type EraserMode, type Style, type Tool } from "./tools";
+import { FRAME_ASPECTS, SWATCHES, isShapeTool, type EraserMode, type FrameAspect, type Style, type Tool } from "./tools";
 
 /** Options for the current tool, floating at the top-left of the board. */
 export function StyleBar({
@@ -27,6 +27,31 @@ export function StyleBar({
 }) {
   // The graph tool has its own editor.
   if (tool === "select" || tool === "lasso" || tool === "hand" || tool === "graph" || tool === "kanban") return null;
+  if (tool === "frame") {
+    return (
+      <div
+        role="toolbar"
+        aria-label="Tool options"
+        className="absolute top-3 left-3 z-20 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-card px-3 py-2 shadow-float"
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <span className="text-xs text-muted-foreground">Shape</span>
+        <ToggleGroup
+          size="sm"
+          value={style.frameAspect}
+          onValueChange={(v) => v && onChange({ frameAspect: v as FrameAspect })}
+          aria-label="Frame shape"
+        >
+          {FRAME_ASPECTS.map((a) => (
+            <ToggleGroupItem key={a.id} value={a.id} data-testid={`frame-aspect-${a.id}`}>
+              {a.label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        <span className="hidden text-xs text-muted-foreground md:inline">Drag around what the slide shows, or click for one the size of the view.</span>
+      </div>
+    );
+  }
   const textLike = tool === "text" || tool === "equation";
 
   const sizeKey: keyof Style =

@@ -2,12 +2,14 @@
 // parser, molar masses and the balancer, the graph expression parser, the
 // collaboration document model (two simulated tabs and a fake server),
 // to-do board layout and card moves, byte ranges for video, the schemas,
-// the seasonal themes' dates, and tracing pictures into strokes.
+// the seasonal themes' dates, tracing pictures into strokes, and frames
+// as slides (order, what a frame carries, the journey's camera path).
 //   npm run test:unit
 import { balanceEquation } from "../src/lib/chem/balance";
 import { ELEMENTS } from "../src/lib/chem/elements";
 import { molarMass, parseSpecies, speciesToMhchem, speciesToText } from "../src/lib/chem/formula";
-import { elementBox, scaleElement } from "../src/lib/canvas/geometry";
+import { elementBox, hitTest, insideFrame, scaleElement, slidesOf } from "../src/lib/canvas/geometry";
+import { cameraFor, flight, journeyVeil, reorderSlides, slideRect } from "../src/lib/canvas/present";
 import {
   addColumn,
   dropSlot,
@@ -21,7 +23,15 @@ import {
   removeColumn,
   wrapText,
 } from "../src/lib/canvas/kanban";
-import { assetIdsOf, elementSchema, type CanvasElement, type KanbanElement } from "../src/lib/canvas/schema";
+import {
+  assetIdsOf,
+  DEFAULT_PRESENTATION,
+  elementSchema,
+  normalizePresentation,
+  type CanvasElement,
+  type FrameElement,
+  type KanbanElement,
+} from "../src/lib/canvas/schema";
 import { parseRange } from "../src/lib/http/range";
 import { CollabDoc, type RemoteChange } from "../src/lib/collab/doc";
 import { applyOps, type DocOp } from "../src/lib/collab/ops";
@@ -498,6 +508,65 @@ eq("board effects off: no animations", kfx.busy, false);
   );
 }
 
+
+// ------------------------------------------------------------ frames and slides
+{
+  const frame = (id: string, x: number, y: number, w: number, h: number, order: number): FrameElement => ({
+    id,
+    type: "frame",
+    x,
+    y,
+    w,
+    h,
+    title: `Slide ${id}`,
+    order,
+  });
+  const a = frame("a", 0, 0, 1600, 900, 2);
+  const b = frame("b", 2000, 0, 1600, 900, 1);
+  const c = frame("c", 0, 1200, 800, 600, 2);
+  eq("slides go by order, then top to bottom", slidesOf([a, b, c]).map((f) => f.id), ["b", "a", "c"]);
+  eq("frames fit the schema", elementSchema.safeParse(a).success, true);
+  eq("a frame needs a title", elementSchema.safeParse({ ...a, title: " " }).success, false);
+  const ink: CanvasElement = { id: "s", type: "stroke", color: "#000", size: 4, points: [100, 100, 300, 200] };
+  const half: CanvasElement = { id: "r", type: "rect", color: "#000", size: 2, fill: null, x: 1500, y: 100, w: 300, h: 100 };
+  eq("a frame carries only what's wholly inside it", insideFrame([a, ink, half, b], a).map((e) => e.id), ["s"]);
+  eq("frames are hit on their edge", hitTest(a, { x: 0, y: 450 }, 4), true);
+  eq("not in the middle, so what's drawn inside stays clickable", hitTest(a, { x: 800, y: 450 }, 4), false);
+  eq("moving slide 3 to the front renumbers 1, 2, 3", reorderSlides(slidesOf([a, b, c]), 2, 0).map((f) => [f.id, f.order]), [
+    ["c", 1],
+    ["b", 2],
+    ["a", 3],
+  ]);
+  eq("moving to where it already is changes nothing", reorderSlides([{ ...b, order: 1 }, { ...a, order: 2 }], 1, 1), []);
+  const screen = { w: 1280, h: 800 };
+  const r = slideRect(elementBox(a), screen, 20);
+  eq("a 16:9 slide fills the width of a 16:10 screen, centred", [Math.round(r.x), Math.round(r.y), Math.round(r.w), Math.round(r.h)], [
+    20,
+    51,
+    1240,
+    698,
+  ]);
+  const from = cameraFor(elementBox(a), screen);
+  const to = cameraFor(elementBox(b), screen);
+  const fly = flight(from, to, screen);
+  eq("the journey starts on the first frame", fly.at(0), from);
+  eq("and ends on the next", fly.at(1), to);
+  const mid = fly.at(0.5);
+  eq("halfway, it's between them", mid.cx > from.cx && mid.cx < to.cx, true);
+  eq("pulled back to show both", mid.scale < Math.min(from.scale, to.scale), true);
+  eq("far frames take longer, within bounds", fly.duration >= 650 && fly.duration <= 1800, true);
+  const zoomOnly = flight(from, { ...from, scale: from.scale * 4 }, screen);
+  eq("zooming in place stays put", Math.round(zoomOnly.at(0.5).cx), Math.round(from.cx));
+  near("the stage covers the canvas when resting", journeyVeil(0), 1);
+  near("…and again on arrival", journeyVeil(1), 1);
+  eq("and mostly lifts mid-flight", journeyVeil(0.5) < 0.2, true);
+  eq("a stored style that isn't known falls back", normalizePresentation({ style: "spin" }), DEFAULT_PRESENTATION);
+  eq("a stored style is kept", normalizePresentation({ style: "journey", stage: "paper", numbers: false }), {
+    style: "journey",
+    stage: "paper",
+    numbers: false,
+  });
+}
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);

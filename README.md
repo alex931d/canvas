@@ -16,6 +16,9 @@ animation, and its own component kit (with Radix underneath for menus and dialog
 - **To-do boards**: To do, Doing and Done columns of cards on the canvas, next to your notes. Drag cards
   between columns and between boards.
 - **Select, move, resize, duplicate, delete**, copy and paste, undo and redo.
+- **Slides from the canvas**: draw frames (F) around parts of a drawing and present them full screen,
+  fading, sliding, or flying across the canvas from one to the next (see
+  [Frames and presenting](#frames-and-presenting)).
 - **AI math check**: press **Check math**, draw a loop around an equation (handwritten or a
   screenshot), and a vision model transcribes it, checks each step, and shows where it goes
   wrong. **Add note to canvas** writes the verdict next to your work.
@@ -143,7 +146,7 @@ Without a key, everything else works and **Check math** explains how to set it u
 | `npm run role -- set <email> <role>\|show <email>\|list` | Roles: make the first admin (see [Roles](#roles-and-the-admin-dashboard)) |
 | `npm run typecheck` | Generate route types and run `tsc` |
 | `npm run test:e2e` | Browser tests (see below) |
-| `npm run test:unit` | Quick checks of the chemistry, graph, collaboration, calendar and picture-tracing logic, no browser needed, then the rate limits against a throwaway `redis-server` |
+| `npm run test:unit` | Quick checks of the chemistry, graph, collaboration, calendar, picture-tracing and slide logic, no browser needed, then the rate limits against a throwaway `redis-server` |
 
 ## Accounts and sessions
 
@@ -582,6 +585,45 @@ A box with more than 2,000 strokes is refused (that's a page, not an equation): 
 lower Detail. Pictures are sized like inserted images: a screenshot keeps its on-screen size, a phone
 photo is shrunk to fit 60 % of the view.
 
+## Frames and presenting
+
+A **frame** marks part of the canvas as a slide. Pick **Frame (a slide)** (F), choose its shape in the
+bar above the board (**16:9**, **4:3**, **Square** or **Any**; Shift draws any shape, or a square when
+the shape is Any) and drag around what the slide should show, or click for one most of the size of the
+view. Frames are a thin outline with their title above; they never show in exports, gallery pictures,
+**Check math** or while presenting.
+
+- **Moving a frame takes what's inside it along** (everything wholly inside; hold **Alt** to move the
+  frame alone). Grab it by its title or its edge: a click inside a frame picks what's drawn there.
+- Resizing keeps the shape (Shift: any shape). The eraser leaves frames alone; Delete removes one.
+- Select a frame for **Present** and **Rename** next to it; double-click its title to rename it in
+  the Slides panel.
+
+**Slides** (in the top bar; under the menu on phones) lists the frames in the order they're shown,
+with a picture of each: rename them, move them up and down, delete a frame (what's drawn there stays),
+present from any of them, or make a **New slide** around what's selected (or in the middle of the
+view). It also sets how the drawing is presented, saved with it and changed live for everyone looking:
+
+- **Moving between slides**: **Fade**; **Slide**, where slides push in from the side; or **Fly**, where
+  the view flies across the canvas from frame to frame (pulling back to show both when they're far
+  apart), so people see how the parts connect.
+- **Around each slide**: **Dark**, or the drawing's own **canvas colour**.
+- **Slide numbers** in the corner.
+
+**Present** fills the screen (full screen where the browser allows). → ↓ Space Enter or a click go on,
+← ↑ Backspace or a click on the left edge go back, Home and End jump, **F** toggles full screen and
+**Esc** stops, leaving the board on the slide you were on. On phones and tablets, swipe; tapping the
+middle shows the controls. Edits other people make while you present appear as they happen; with
+"reduce motion" turned on in the device's settings, slides change without moving.
+
+How it works: a frame is an element like any other (`{ type: "frame", x, y, w, h, title, order }`), so
+it syncs, undoes and merges the same way; `order` is a number, with ties broken by position, and
+reordering renumbers 1, 2, 3. The presentation style is `drawings.presentation` (jsonb), saved by the
+`savePresentation` action and announced to open editors in the live stream's `meta` event. Slides are
+drawn with the same renderer as exports (`renderRegion`, one picture per slide at screen size,
+cached); a fly is a smooth zoom-and-pan through the whole canvas (van Wijk and Nuij's path,
+`src/lib/canvas/present.ts`) with the stage veiling all but the frame, lifting mid-flight.
+
 ## Live collaboration
 
 Open **Share** in a drawing and turn on **Invite with a link**. Anyone with a membership who opens the
@@ -810,7 +852,7 @@ settings sections.
 | L / A | Line / arrow | Arrows (+Shift) | Nudge |
 | R / O | Rectangle / ellipse | Ctrl/⌘ + / − / 0 | Zoom in / out / 100 % |
 | M | Equation | G | Graph |
-| U | Trace a picture into strokes | | |
+| U | Trace a picture into strokes | F | Frame (a slide); Alt+drag moves a frame alone |
 | K | To-do board | Shift + corner drag | Stretch; widen a to-do board |
 | Shift while drawing | Square, circle, 45° lines | Shift 1 / Shift 2 | Zoom to fit / selection |
 
@@ -881,6 +923,8 @@ src/
     editor/share-dialog.tsx      invite link, roles, people
     editor/flashcard-dialog.tsx  make a card from the selection
     editor/trace-picture-dialog.tsx  Trace a picture: the box, the preview, Detail, Add to canvas
+    editor/slides-panel.tsx      the frames as slides: order, titles, pictures, style, Present
+    editor/presenter.tsx         full-screen slides: keys, swipes, fade / slide / fly
     gallery/                     overview cards, drawing grids, delete / leave
     study/                       review session, card list
     kit/                         the component kit: buttons, fields, menus, dialogs, toasts…
@@ -899,6 +943,7 @@ src/
     auth/secret-box.ts           AES-256-GCM with ENCRYPTION_KEY, for the two-factor keys
     auth/google.ts               Google OAuth (arctic), linking Google accounts
     canvas/trace.ts              tracing a picture into strokes: threshold, clean, thin, walk, simplify
+    canvas/present.ts            presenting: slide placement, the fly path, reordering slides
     auth/captcha.ts              Turnstile siteverify (server); captcha-shared.ts for the forms
     auth/rate-limit.ts           the rate limits: token buckets and the per-account login throttle
     rate-limit/buckets.ts        how they work, in Redis (Lua) or in memory
@@ -989,9 +1034,10 @@ stops when the system asks for reduced motion.
 `subscriptions`: `id` (Stripe's `sub_...`, or `comp_...`), `user_id` (cascade delete), `customer_id`,
 `status`, `price_id`, `current_period_end`, `cancel_at` (set once cancelled), `ended_at`. See
 [Memberships](#memberships).
-`drawings`: `id`, `user_id` (the owner), `title`, `data` (jsonb), `thumbnail`, `version` (bumped by
-every applied change), `share_token` (the invite link's secret, null when off), `share_role`,
-`created_at`, `updated_at`.
+`drawings`: `id`, `user_id` (the owner), `title`, `data` (jsonb), `presentation` (jsonb: `style`,
+`stage`, `numbers`; null until set, see [Frames and presenting](#frames-and-presenting)), `thumbnail`,
+`version` (bumped by every applied change), `share_token` (the invite link's secret, null when off),
+`share_role`, `created_at`, `updated_at`.
 `drawing_members`: `drawing_id`, `user_id`, `role` (`editor` or `viewer`), `created_at`.
 `drawing_changes`: `drawing_id`, `version`, `batch_id` (unique per drawing), `client_id`, `user_id`,
 `ops` (jsonb); the recent history editors catch up from, pruned to about 2,000 rows per drawing.
@@ -1021,6 +1067,7 @@ every applied change), `share_token` (the invite link's secret, null when off), 
   { type: "math", syntax: "tex" | "chem", source, color, x, y, size, w, h },
   { type: "graph", x, y, w, h, fns: [{ expr, color }], xMin, xMax, yMin, yMax, grid },
   { type: "kanban", x, y, w, scale, title, columns: [{ id, title, color, cards: [{ id, text }] }] },
+  { type: "frame", x, y, w, h, title, order },                       // a slide
 ] }
 ```
 
@@ -1166,6 +1213,15 @@ Google, it checks the client secret, the redirect URI and the PKCE verifier. `GO
   Whole picture, the count and preview following it in the pen colour, the dark-background switch
   (detected, and overridden), Detail, Add to canvas (every stroke, selected, saved as marker strokes in
   the pen colour, the writing's shape), one undo, Cancel, a file that isn't a picture, and a phone.
+- `e2e/test-frames.mjs` (55 checks): frames and presenting. The Frame tool (F) in 16:9 and square, a
+  click for a view-sized frame, New slide around a selection; moving a frame by its title takes what's
+  wholly inside (Alt: the frame alone), clicks inside reach what's drawn there, the eraser leaves frames;
+  the Slides panel (pictures, rename, reorder, delete, double-clicking a title); the style, stage and
+  numbers saved, sent live to another tab and kept after reloading; presenting (a dark stage, the
+  slide on the drawing's background, no frame outlines, keys, numbers once the controls tuck away, the
+  end, keys kept from the board, Esc back to that slide), a fly showing the canvas mid-flight, reduced
+  motion, undo, a view-only member presenting but not editing, and a phone (the menu, a swipe, a tap
+  for the controls).
 - `e2e/test-input.mjs` (6 checks): real pen pressure, two-finger pinch zoom, and opening a version 1
   drawing.
 - `e2e/test-collab.mjs` (40 checks): three people in three browsers. Invite links (members
@@ -1223,7 +1279,9 @@ themes' dates (Easter Sundays from 2024 to 2285, and each theme's first and last
 dashboard's address handling and five-page window, the settings' parsing, profile picture URLs and type
 sniffing, the drawing and to-do board effects (what replays, what waits, ghosts, glides from a
 drop, a moved board's cards not lagging), and picture tracing (a bar, a ring, a plus sign, a dot under
-a line, grain, shade across a photo, a blackboard, finding the writing), without a browser.
+a line, grain, shade across a photo, a blackboard, finding the writing), and frames as slides (their
+order, what a frame carries, edge-only hits, renumbering, where a slide sits on the screen, the fly
+path's ends, pull-back and length, stored styles), without a browser.
 
 Each suite signs up its own account first (with a complimentary membership, except where the
 membership is what's being tested). They need Chrome (`CHROME_PATH` if it isn't
