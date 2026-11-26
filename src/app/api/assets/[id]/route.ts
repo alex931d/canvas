@@ -2,7 +2,7 @@ import { and, eq, isNotNull, or, sql } from "drizzle-orm";
 import { connection } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
-import { assets, drawingMembers, drawings } from "@/db/schema";
+import { assets, drawingMembers, drawings, workspaceMembers } from "@/db/schema";
 import { getCurrentSession } from "@/lib/auth/session";
 import { membershipRequiredResponse } from "@/lib/billing/membership";
 import { parseRange } from "@/lib/http/range";
@@ -17,10 +17,15 @@ import { parseRange } from "@/lib/http/range";
  * into memory whole.
  */
 
-/** Rows of the asset this user may see: they own the drawing or were invited to it. */
+/** Rows of the asset this user may see: they own the drawing, were invited to it, or are in its workspace. */
 const memberOf = (userId: string) => and(eq(drawingMembers.drawingId, drawings.id), eq(drawingMembers.userId, userId));
+const inWorkspaceOf = (userId: string) =>
+  and(eq(workspaceMembers.workspaceId, drawings.workspaceId), eq(workspaceMembers.userId, userId));
 const visible = (id: string, userId: string) =>
-  and(eq(assets.id, id), or(eq(drawings.userId, userId), isNotNull(drawingMembers.userId)));
+  and(
+    eq(assets.id, id),
+    or(eq(drawings.userId, userId), isNotNull(drawingMembers.userId), isNotNull(workspaceMembers.userId)),
+  );
 
 const HEADERS = {
   "Accept-Ranges": "bytes",
@@ -45,6 +50,7 @@ export async function GET(request: Request, ctx: RouteContext<"/api/assets/[id]"
       .from(assets)
       .innerJoin(drawings, eq(drawings.id, assets.drawingId))
       .leftJoin(drawingMembers, memberOf(user.id))
+      .leftJoin(workspaceMembers, inWorkspaceOf(user.id))
       .where(visible(id, user.id))
       .limit(1);
     if (!meta) return new Response("Not found", { status: 404 });
@@ -59,6 +65,7 @@ export async function GET(request: Request, ctx: RouteContext<"/api/assets/[id]"
         .from(assets)
         .innerJoin(drawings, eq(drawings.id, assets.drawingId))
         .leftJoin(drawingMembers, memberOf(user.id))
+        .leftJoin(workspaceMembers, inWorkspaceOf(user.id))
         .where(visible(id, user.id))
         .limit(1);
       if (!row) return new Response("Not found", { status: 404 });
@@ -79,6 +86,7 @@ export async function GET(request: Request, ctx: RouteContext<"/api/assets/[id]"
     .from(assets)
     .innerJoin(drawings, eq(drawings.id, assets.drawingId))
     .leftJoin(drawingMembers, memberOf(user.id))
+    .leftJoin(workspaceMembers, inWorkspaceOf(user.id))
     .where(visible(id, user.id))
     .limit(1);
   if (!row) return new Response("Not found", { status: 404 });

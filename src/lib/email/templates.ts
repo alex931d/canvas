@@ -198,3 +198,34 @@ export function googleLinkedEmail({ name, email, resetLink, googleEmail }: Notic
     resetLink,
   });
 }
+
+export function workspaceInviteEmail({
+  inviter,
+  workspace,
+  role,
+  link,
+}: {
+  inviter: string;
+  workspace: string;
+  role: "editor" | "viewer";
+  link: string;
+}): Message {
+  const what = role === "editor" ? "draw on its drawings together, live" : "open its drawings and follow along as they change";
+  const subject = `${inviter} invited you to ${workspace} on canvas`;
+  const text = [
+    "Hi,",
+    "",
+    `${inviter} invited you to the workspace "${workspace}" on canvas, where you'll be able to ${what}.`,
+    "",
+    `Join it here (it works for 14 days, with an account for this email address):\n${link}`,
+    "",
+    "If you weren't expecting this, you can ignore this email.",
+  ].join("\n");
+  const html = page(
+    subject,
+    p(`${esc(inviter)} invited you to the workspace <strong>${esc(workspace)}</strong> on canvas, where you'll be able to ${esc(what)}.`) +
+      button(link, "Join the workspace") +
+      p("The link works for 14 days, with a canvas account for this email address. If you weren't expecting this, you can ignore this email.", true),
+  );
+  return { subject, text, html };
+}

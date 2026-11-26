@@ -16,6 +16,8 @@ animation, and its own component kit (with Radix underneath for menus and dialog
 - **To-do boards**: To do, Doing and Done columns of cards on the canvas, next to your notes. Drag cards
   between columns and between boards.
 - **Select, move, resize, duplicate, delete**, copy and paste, undo and redo.
+- **Team workspaces** for a class, a study group or a team: invite people once (by link or email),
+  and everyone in it can open its drawings (see [Team workspaces](#team-workspaces)).
 - **Slides from the canvas**: draw frames (F) around parts of a drawing and present them full screen,
   fading, sliding, or flying across the canvas from one to the next (see
   [Frames and presenting](#frames-and-presenting)).
@@ -146,7 +148,7 @@ Without a key, everything else works and **Check math** explains how to set it u
 | `npm run role -- set <email> <role>\|show <email>\|list` | Roles: make the first admin (see [Roles](#roles-and-the-admin-dashboard)) |
 | `npm run typecheck` | Generate route types and run `tsc` |
 | `npm run test:e2e` | Browser tests (see below) |
-| `npm run test:unit` | Quick checks of the chemistry, graph, collaboration, calendar, picture-tracing and slide logic, no browser needed, then the rate limits against a throwaway `redis-server` |
+| `npm run test:unit` | Quick checks of the chemistry, graph, collaboration, calendar, picture-tracing, slide and workspace-role logic, no browser needed, then the rate limits against a throwaway `redis-server` |
 
 ## Accounts and sessions
 
@@ -624,6 +626,40 @@ drawn with the same renderer as exports (`renderRegion`, one picture per slide a
 cached); a fly is a smooth zoom-and-pan through the whole canvas (van Wijk and Nuij's path,
 `src/lib/canvas/present.ts`) with the stage veiling all but the frame, lifting mid-flight.
 
+## Team workspaces
+
+**Workspaces** (in the sidebar) is where groups keep drawings together. Make one by naming it; you're
+its owner. Everyone in a workspace can open its drawings, with their workspace role:
+
+| Role | What they can do |
+| --- | --- |
+| Owner | Everything below, plus make people admins, and delete the workspace |
+| Admin | Invite people, change editors and viewers, remove them, rename the workspace, take drawings out |
+| Can edit | Make drawings in it (**New Drawing** on its page) and draw on all of its drawings, live |
+| Can view | Open its drawings and follow along as they change |
+
+- **Inviting**: by **email** (a link that works for 14 days, for an account with that confirmed
+  address; it also waits on their Workspaces page, to join without the link), or with the
+  workspace's **invite link** (anyone with a membership who opens it joins, as an editor or a viewer;
+  **New link** replaces it, and turning it off keeps who already joined). Pending invitations can be
+  cancelled. Joining takes a membership.
+- **Moving drawings**: a drawing's ⋯ menu on your drawings page moves it into a workspace you can edit
+  in, or takes it out again. Admins can take any drawing out, which leaves it with the person who made
+  it. A drawing's owner stays its owner wherever it is (only they delete it or share it on its own).
+- Role changes and removals reach open drawings at once: someone removed sees "You no longer have
+  access", someone made an editor can draw straight away.
+- Anyone can **leave** a workspace except its owner, who can **delete** it instead: its drawings
+  aren't deleted but go back to the people who made them.
+- People who aren't in a workspace get the same "not open to you" page whether or not it exists, and
+  only owners and admins see members' email addresses.
+
+How it works: `workspaces`, `workspace_members` (one owner) and `workspace_invites` (only a SHA-256 of
+each emailed token is kept) in Postgres, and `drawings.workspace_id`. A drawing's role is the best of
+owning it, being invited to it, and being in its workspace (`getRole` in `src/lib/collab/access.ts`;
+the write path and pictures check the same). Changes are Server Actions in
+`src/app/workspace-actions.ts`, each checking the session, the membership and the role; the rules
+for who may change whom are in `src/lib/workspaces/roles.ts`.
+
 ## Live collaboration
 
 Open **Share** in a drawing and turn on **Invite with a link**. Anyone with a membership who opens the
@@ -883,9 +919,12 @@ src/
     page.tsx                     gallery: your drawings, shared with you, flashcards due
     drawings/[id]/page.tsx       editor page
     join/[token]/page.tsx        where invite links lead
+    join/workspace/[token]/      where workspace invite links (and emailed invitations) lead
+    workspaces/                  your workspaces, invitations, a new one; [id]/ one workspace's drawings and people
     study/                       flashcard review and card management; actions.ts records answers
     actions.ts                   Server Actions: create, rename, delete (validated with zod)
     sharing-actions.ts           Server Actions: invite link, roles, remove, join, leave
+    workspace-actions.ts         Server Actions for workspaces: make, rename, invite, roles, join, leave, move drawings
     api/drawings/[id]/changes    POST batches of changes (the collaboration write path)
     api/drawings/[id]/events     GET live updates (Server-Sent Events)
     api/health                   GET 200 "ok" when the app can reach its database (for health checks)
@@ -925,7 +964,8 @@ src/
     editor/trace-picture-dialog.tsx  Trace a picture: the box, the preview, Detail, Add to canvas
     editor/slides-panel.tsx      the frames as slides: order, titles, pictures, style, Present
     editor/presenter.tsx         full-screen slides: keys, swipes, fade / slide / fly
-    gallery/                     overview cards, drawing grids, delete / leave
+    gallery/                     overview cards, drawing grids, delete / leave / move between workspaces
+    workspaces/                  new workspace form, invitations, the people panel, the name and its menu
     study/                       review session, card list
     kit/                         the component kit: buttons, fields, menus, dialogs, toasts…
   db/schema.ts                   users (with roles), sessions, email codes, reset links, audit events,
@@ -1039,6 +1079,12 @@ stops when the system asks for reduced motion.
 `version` (bumped by every applied change), `share_token` (the invite link's secret, null when off),
 `share_role`, `created_at`, `updated_at`.
 `drawing_members`: `drawing_id`, `user_id`, `role` (`editor` or `viewer`), `created_at`.
+
+`workspaces`: `id`, `name`, `invite_token` (the invite link's secret, null when off), `invite_role`,
+`created_at`, `updated_at`. `workspace_members`: `workspace_id`, `user_id`, `role` (`owner`, `admin`,
+`editor` or `viewer`), `created_at`. `workspace_invites`: `id`, `workspace_id`, `email` (lowercased),
+`role`, `token_hash` (SHA-256), `invited_by`, `created_at`, `expires_at`. `drawings.workspace_id` is
+the workspace a drawing is in (null for your own; set back to null when the workspace is deleted).
 `drawing_changes`: `drawing_id`, `version`, `batch_id` (unique per drawing), `client_id`, `user_id`,
 `ops` (jsonb); the recent history editors catch up from, pruned to about 2,000 rows per drawing.
 `assets`: `id` (generated in the browser), `drawing_id` (cascade delete), `mime_type`, `bytes`
@@ -1213,6 +1259,12 @@ Google, it checks the client secret, the redirect URI and the PKCE verifier. `GO
   Whole picture, the count and preview following it in the pen colour, the dark-background switch
   (detected, and overridden), Detail, Add to canvas (every stroke, selected, saved as marker strokes in
   the pen colour, the writing's shape), one undo, Cancel, a file that isn't a picture, and a phone.
+- `e2e/test-workspaces.mjs` (51 checks): team workspaces with four people: making one (a name
+  needed), a drawing made in it and the share dialog saying so, the invite link (members only), an
+  emailed invitation (its link, only a hash stored, the in-app list, someone else's account, a
+  cancelled one), editors drawing and viewers refused by the server, role changes and removal
+  reaching open drawings live, what admins may and may not change, the not-open-to-you page, moving
+  drawings in and out, renaming, leaving, and deleting it giving drawings back to their makers.
 - `e2e/test-frames.mjs` (55 checks): frames and presenting. The Frame tool (F) in 16:9 and square, a
   click for a view-sized frame, New slide around a selection; moving a frame by its title takes what's
   wholly inside (Alt: the frame alone), clicks inside reach what's drawn there, the eraser leaves frames;
@@ -1281,7 +1333,8 @@ sniffing, the drawing and to-do board effects (what replays, what waits, ghosts,
 drop, a moved board's cards not lagging), and picture tracing (a bar, a ring, a plus sign, a dot under
 a line, grain, shade across a photo, a blackboard, finding the writing), and frames as slides (their
 order, what a frame carries, edge-only hits, renumbering, where a slide sits on the screen, the fly
-path's ends, pull-back and length, stored styles), without a browser.
+path's ends, pull-back and length, stored styles), and who may do what in a workspace, without a
+browser.
 
 Each suite signs up its own account first (with a complimentary membership, except where the
 membership is what's being tested). They need Chrome (`CHROME_PATH` if it isn't

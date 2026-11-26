@@ -3,13 +3,15 @@
 // collaboration document model (two simulated tabs and a fake server),
 // to-do board layout and card moves, byte ranges for video, the schemas,
 // the seasonal themes' dates, tracing pictures into strokes, and frames
-// as slides (order, what a frame carries, the journey's camera path).
+// as slides (order, what a frame carries, the journey's camera path), and
+// who may do what in a team workspace.
 //   npm run test:unit
 import { balanceEquation } from "../src/lib/chem/balance";
 import { ELEMENTS } from "../src/lib/chem/elements";
 import { molarMass, parseSpecies, speciesToMhchem, speciesToText } from "../src/lib/chem/formula";
 import { elementBox, hitTest, insideFrame, scaleElement, slidesOf } from "../src/lib/canvas/geometry";
 import { cameraFor, flight, journeyVeil, reorderSlides, slideRect } from "../src/lib/canvas/present";
+import { assignableRoles, canManageMember, drawingRoleFrom } from "../src/lib/workspaces/roles";
 import {
   addColumn,
   dropSlot,
@@ -566,6 +568,25 @@ eq("board effects off: no animations", kfx.busy, false);
     stage: "paper",
     numbers: false,
   });
+}
+
+// ------------------------------------------------------------ workspace roles
+{
+  eq("owners, admins and editors edit a workspace's drawings", ["owner", "admin", "editor"].map((r) => drawingRoleFrom(r as "owner")), [
+    "editor",
+    "editor",
+    "editor",
+  ]);
+  eq("viewers view them", drawingRoleFrom("viewer"), "viewer");
+  eq("and outsiders get nothing", drawingRoleFrom(null), null);
+  eq("owners can make admins", assignableRoles("owner"), ["admin", "editor", "viewer"]);
+  eq("admins can't", assignableRoles("admin"), ["editor", "viewer"]);
+  eq("editors give no roles", assignableRoles("editor"), []);
+  eq("owners manage admins", canManageMember("owner", "admin"), true);
+  eq("admins manage editors and viewers", [canManageMember("admin", "editor"), canManageMember("admin", "viewer")], [true, true]);
+  eq("but not other admins, or the owner", [canManageMember("admin", "admin"), canManageMember("admin", "owner")], [false, false]);
+  eq("editors manage nobody, not even viewers", canManageMember("editor", "viewer"), false);
+  eq("nobody manages the owner", canManageMember("owner", "owner"), false);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

@@ -317,6 +317,12 @@ export const drawings = pgTable(
      * account created adopts those (see src/lib/auth/account.ts).
      */
     userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * The team workspace it's in, or null for the owner's own drawings. Its
+     * members can open it with their workspace role; deleting the workspace
+     * gives its drawings back to their owners.
+     */
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "set null" }),
     title: text("title").notNull().default("Untitled"),
     /**
      * Vector scene (see src/lib/canvas/schema.ts). Older rows may hold the
@@ -349,10 +355,79 @@ export const drawings = pgTable(
     index("drawings_updated_at_idx").on(t.updatedAt.desc()),
     index("drawings_user_id_idx").on(t.userId, t.updatedAt.desc()),
     uniqueIndex("drawings_share_token_idx").on(t.shareToken),
+    index("drawings_workspace_id_idx").on(t.workspaceId, t.updatedAt.desc()),
   ],
 ).enableRLS();
 
 export type MemberRole = "editor" | "viewer";
+
+/**
+ * Team workspaces: a group of people and the drawings they share. Everyone
+ * in it can open its drawings, with their workspace role (see
+ * src/lib/workspaces/roles.ts).
+ */
+export const workspaces = pgTable(
+  "workspaces",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    /** Secret in the invite link (/join/workspace/<token>); null while the link is off. */
+    inviteToken: text("invite_token"),
+    /** What joining with the link makes you: "editor" or "viewer". */
+    inviteRole: text("invite_role").$type<MemberRole>().notNull().default("editor"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [uniqueIndex("workspaces_invite_token_idx").on(t.inviteToken)],
+).enableRLS();
+
+export type WorkspaceRole = "owner" | "admin" | "editor" | "viewer";
+
+/** Who's in a workspace. Exactly one owner, who made it (or was handed it). */
+export const workspaceMembers = pgTable(
+  "workspace_members",
+  {
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").$type<WorkspaceRole>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.workspaceId, t.userId] }), index("workspace_members_user_id_idx").on(t.userId)],
+).enableRLS();
+
+/**
+ * Invitations emailed to one address. The link's token is only in the email;
+ * this keeps its SHA-256. Accepting needs an account with that (confirmed)
+ * address; it's used up then, or after 14 days.
+ */
+export const workspaceInvites = pgTable(
+  "workspace_invites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Lowercased. */
+    email: text("email").notNull(),
+    role: text("role").$type<MemberRole>().notNull(),
+    tokenHash: bytea("token_hash").notNull(),
+    invitedBy: uuid("invited_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("workspace_invites_token_hash_idx").on(t.tokenHash),
+    uniqueIndex("workspace_invites_workspace_email_idx").on(t.workspaceId, t.email),
+    index("workspace_invites_email_idx").on(t.email),
+  ],
+).enableRLS();
 
 /**
  * People a drawing is shared with (the owner is drawings.user_id). Rows are

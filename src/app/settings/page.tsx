@@ -1,4 +1,4 @@
-import { GalleryVerticalEnd, LayoutGrid } from "lucide-react";
+import { GalleryVerticalEnd, LayoutGrid, UsersRound } from "lucide-react";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { StaffSidebarLink } from "@/components/admin/staff-sidebar-link";
@@ -39,6 +39,7 @@ export default function SettingsPage({ searchParams }: PageProps<"/settings">) {
         }
       >
         <SidebarLink href="/" icon={<LayoutGrid />} label="Drawings" />
+        <SidebarLink href="/workspaces" icon={<UsersRound />} label="Workspaces" />
         <SidebarLink href="/study" icon={<GalleryVerticalEnd />} label="Study" />
         <Suspense fallback={null}>
           <StaffSidebarLink />

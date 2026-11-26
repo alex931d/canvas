@@ -15,10 +15,11 @@ function Submit({ label }: { label: React.ReactNode }) {
   );
 }
 
-/** Without a label: "New Drawing", just "New" on the narrowest phones (read out in full). */
-export function NewDrawingButton({ label }: { label?: string }) {
+/** Without a label: "New Drawing", just "New" on the narrowest phones (read out in full). In a workspace with `workspaceId`. */
+export function NewDrawingButton({ label, workspaceId }: { label?: string; workspaceId?: string }) {
   return (
     <form action={createDrawing}>
+      {workspaceId ? <input type="hidden" name="workspace" value={workspaceId} /> : null}
       <Submit
         label={
           label ?? (

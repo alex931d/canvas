@@ -5,7 +5,7 @@ import { io } from "next/cache";
 import { cache } from "react";
 import { z } from "zod";
 import { db } from "@/db";
-import { assets, drawingMembers, drawings, users, type MemberRole } from "@/db/schema";
+import { assets, drawingMembers, drawings, users, workspaces, type MemberRole } from "@/db/schema";
 import { requireMember } from "@/lib/billing/membership";
 import { getRole } from "@/lib/collab/access";
 import { normalizeDrawing, normalizePresentation } from "@/lib/canvas/schema";
@@ -30,6 +30,8 @@ export type DrawingSummary = {
   members: number;
   /** An invite link is active. */
   linkShared: boolean;
+  /** The team workspace it's in, if any. */
+  workspace: { id: string; name: string } | null;
 };
 
 export async function listDrawings(): Promise<DrawingSummary[]> {
@@ -43,10 +45,19 @@ export async function listDrawings(): Promise<DrawingSummary[]> {
       updatedAt: drawings.updatedAt,
       members: sql<number>`(select count(*)::int from ${drawingMembers} where ${drawingMembers.drawingId} = ${drawings.id})`,
       linkShared: sql<boolean>`${drawings.shareToken} is not null`,
+      workspaceId: drawings.workspaceId,
+      workspaceName: workspaces.name,
     })
     .from(drawings)
+    .leftJoin(workspaces, eq(workspaces.id, drawings.workspaceId))
     .where(eq(drawings.userId, user.id))
-    .orderBy(desc(drawings.updatedAt));
+    .orderBy(desc(drawings.updatedAt))
+    .then((rows) =>
+      rows.map(({ workspaceId, workspaceName, ...d }) => ({
+        ...d,
+        workspace: workspaceId ? { id: workspaceId, name: workspaceName ?? "Workspace" } : null,
+      })),
+    );
 }
 
 export type SharedDrawingSummary = {

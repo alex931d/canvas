@@ -5,12 +5,13 @@ import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/db";
-import { drawings } from "@/db/schema";
+import { drawings, workspaceMembers } from "@/db/schema";
 import { getCurrentSession, requireUser } from "@/lib/auth/session";
 import { getMembership, requireMember } from "@/lib/billing/membership";
 import { emptyDrawing, presentationSchema, titleSchema } from "@/lib/canvas/schema";
 import { canEdit, getRole } from "@/lib/collab/access";
 import { notify } from "@/lib/collab/notify";
+import { canEditInWorkspace } from "@/lib/workspaces/roles";
 
 /*
  * Server Actions are public HTTP endpoints: each one checks the session and
@@ -36,11 +37,25 @@ const MEMBERSHIP_ENDED: SaveResult = {
   error: "Your membership has ended. Your changes are kept in this browser; renew to sync them.",
 };
 
-export async function createDrawing() {
+/** A new drawing, yours; with a `workspace` field, in that team workspace (if you can edit there). */
+export async function createDrawing(form?: FormData) {
   const user = await requireMember();
+  const workspace = form?.get("workspace");
+  let workspaceId: string | null = null;
+  if (typeof workspace === "string" && workspace) {
+    const parsed = idSchema.safeParse(workspace);
+    const [member] = parsed.success
+      ? await db
+          .select({ role: workspaceMembers.role })
+          .from(workspaceMembers)
+          .where(and(eq(workspaceMembers.workspaceId, parsed.data), eq(workspaceMembers.userId, user.id)))
+      : [];
+    if (!member || !canEditInWorkspace(member.role)) redirect(parsed.success ? `/workspaces/${parsed.data}` : "/workspaces");
+    workspaceId = parsed.data!;
+  }
   const [row] = await db
     .insert(drawings)
-    .values({ title: "Untitled", data: emptyDrawing(), userId: user.id })
+    .values({ title: "Untitled", data: emptyDrawing(), userId: user.id, workspaceId })
     .returning({ id: drawings.id });
 
   redirect(`/drawings/${row.id}`);
