@@ -23,6 +23,8 @@
 # misc
 .DS_Store
 *.pem
+# a local Redis started in this folder saves here
+dump.rdb
 
 # debug
 npm-debug.log*
