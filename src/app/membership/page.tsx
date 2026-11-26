@@ -8,6 +8,7 @@ import {
   RefreshWhileConfirming,
   SignOutButton,
 } from "@/components/billing/membership-buttons";
+import { WelcomeMove } from "@/components/gallery/browser-gallery";
 import { LocalDate } from "@/components/local-time";
 import { Badge, Button, Skeleton } from "@/components/kit";
 import type { SessionUser } from "@/lib/auth/session";
@@ -137,6 +138,9 @@ function MemberView({ membership, welcome }: { membership: Membership; welcome: 
           `${MEMBERSHIP.price} ${MEMBERSHIP.per}.`
         )}
       </p>
+
+      {/* Drawings made in this browser on the free plan go into the account now (and on the home page later). */}
+      {welcome ? <WelcomeMove className="mt-6 mb-0 bg-beige-100 sm:mb-0" /> : null}
 
       <div className="mt-8 grid gap-3">
         <Button asChild size="xl" full>

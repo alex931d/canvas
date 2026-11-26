@@ -1,12 +1,16 @@
-import { Eye, Users, UsersRound } from "lucide-react";
+import { Eye, Lock, Users, UsersRound } from "lucide-react";
 import Link from "next/link";
 import { LocalTime } from "@/components/local-time";
-import { Skeleton } from "@/components/kit";
-import { listDrawings, listSharedWithMe } from "@/lib/drawings";
+import { Button, Skeleton } from "@/components/kit";
+import { requireUser } from "@/lib/auth/session";
+import { getMembership } from "@/lib/billing/membership";
+import { MEMBERSHIP } from "@/lib/billing/plan";
+import { countOwnDrawings, listDrawings, listSharedWithMe } from "@/lib/drawings";
 import { studySummary } from "@/lib/study/cards";
 import { cn } from "@/lib/utils";
 import { listWorkspaces } from "@/lib/workspaces/data";
 import { canEditInWorkspace } from "@/lib/workspaces/roles";
+import { BrowserGallery, PendingBrowserDrawings } from "./browser-gallery";
 import { DrawingCard } from "./drawing-card";
 import { DrawingMenu } from "./drawing-menu";
 import { NewDrawingButton } from "./new-drawing-button";
@@ -14,8 +18,12 @@ import { NewDrawingButton } from "./new-drawing-button";
 const STAT = "flex min-h-[88px] flex-col justify-between gap-2 rounded-xl p-3 sm:min-h-0 sm:justify-start sm:gap-3 sm:p-6";
 const STAT_NUMBER = "text-2xl leading-none font-bold sm:text-[32px]";
 
-/** Summary cards, your drawings, and drawings shared with you. */
+/** Summary cards, your drawings, and drawings shared with you; without a membership, the free plan's home. */
 export async function Overview() {
+  const user = await requireUser();
+  const membership = await getMembership(user.id);
+  if (!membership.isMember) return <FreeOverview ended={membership.subscription !== null} />;
+
   const [drawings, shared, study, teams] = await Promise.all([
     listDrawings(),
     listSharedWithMe(),
@@ -27,6 +35,7 @@ export async function Overview() {
 
   return (
     <>
+      <PendingBrowserDrawings />
       {/* Phones: three small tiles in a row, so the drawings start near the top. */}
       <section aria-label="Summary" className="mb-6 grid grid-cols-3 gap-2 sm:mb-8 sm:gap-3 md:gap-6">
         <div className={cn(STAT, "bg-grey-900 text-white")}>
@@ -180,6 +189,61 @@ export async function Overview() {
             open its drawings.
           </p>
         )}
+      </section>
+    </>
+  );
+}
+
+/**
+ * Signed in without a membership: the drawings in this browser, and what the
+ * membership adds. After a membership ends, the drawings in the account are
+ * kept; this says how many, and renewing opens them again.
+ */
+async function FreeOverview({ ended }: { ended: boolean }) {
+  const kept = ended ? await countOwnDrawings() : 0;
+  return (
+    <>
+      <section
+        aria-label="Your plan"
+        data-testid="free-plan"
+        className="mb-6 flex flex-wrap items-center gap-x-8 gap-y-4 rounded-xl bg-grey-900 px-6 py-5 text-white sm:mb-8"
+      >
+        <div className="min-w-0 flex-1">
+          <p className="font-bold">
+            {ended ? "Your membership has ended" : "You're on the free plan"}
+          </p>
+          <p className="mt-1 max-w-[40rem] text-sm leading-relaxed text-grey-300">
+            {ended && kept > 0
+              ? `The ${kept === 1 ? "drawing" : `${kept} drawings`} in your account ${kept === 1 ? "is" : "are"} kept safe. Renew to open ${kept === 1 ? "it" : "them"} again; until then, drawings you start are saved in this browser.`
+              : "New drawings are saved in this browser. The membership keeps them in your account and adds math checks, chemistry tools, flashcards, drawing together and team workspaces."}
+          </p>
+        </div>
+        <Button asChild variant="light" size="lg">
+          <Link href="/pricing">
+            {ended ? "Renew membership" : `Get the membership, ${MEMBERSHIP.price} ${MEMBERSHIP.per}`}
+          </Link>
+        </Button>
+      </section>
+
+      <BrowserGallery member={false} />
+
+      <section aria-label="Member features" className="mt-8 grid gap-3 sm:grid-cols-2">
+        {[
+          { href: "/study", title: "Flashcards and study", text: "Turn parts of a drawing into cards and review them." },
+          { href: "/workspaces", title: "Team workspaces", text: "Share drawings with a class or a study group." },
+        ].map((f) => (
+          <Link
+            key={f.href}
+            href="/pricing"
+            className="flex items-start gap-3 rounded-xl bg-card px-5 py-4 outline-none hover:ring-2 hover:ring-green/40 focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Lock className="mt-0.5 size-4 shrink-0 text-grey-500" aria-hidden />
+            <span>
+              <span className="block font-bold">{f.title}</span>
+              <span className="block text-sm text-muted-foreground">{f.text} Part of the membership.</span>
+            </span>
+          </Link>
+        ))}
       </section>
     </>
   );

@@ -82,6 +82,8 @@ function makeLimiters() {
     presenceByUser: localBucket(60, 0.05),
     /** Flashcards made: 60, then one every 2 s, per user. */
     flashcardsByUser: bucket("flashcardsByUser", 60, 2),
+    /** Drawings moved in from a browser: 50, then one every 2 s, per user. */
+    importsByUser: bucket("importsByUser", 50, 2),
     /** Images, GIFs and videos uploaded: 100, then one every 6 s, per user. */
     uploadsByUser: bucket("uploadsByUser", 100, 6),
     /** Study buddy settings saved: 60, then one a second, per user. */

@@ -1,8 +1,10 @@
 "use client";
 
 import { Cloud, CloudOff, HardDrive, LoaderCircle } from "lucide-react";
+import Link from "next/link";
 import { Button, Popover, PopoverContent, PopoverTrigger } from "@/components/kit";
 import type { ConnectionState } from "@/lib/collab/sync-client";
+import type { BrowserSaveState } from "@/lib/local-store/browser-session";
 import type { LocalStatus } from "@/lib/local-store/store";
 import { cn } from "@/lib/utils";
 
@@ -174,6 +176,95 @@ export function StoragePopover({
         <p className="mt-3 text-xs text-muted-foreground">
           Free up space removes this browser&rsquo;s copies of images and videos that are already saved on the server.
           Anything not yet synced is never removed.
+        </p>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * On the free plan the drawing lives only in this browser: the header says
+ * whether it's saved, and the panel says what that means and how to keep it.
+ */
+export function BrowserSavePopover({
+  status,
+  readOnly,
+  member,
+  message,
+  onDownloadBackup,
+  onMove,
+}: {
+  status: BrowserSaveState | null;
+  /** Open for editing in another tab. */
+  readOnly: boolean;
+  /** Members can move it into their account. */
+  member: boolean;
+  message: string | null;
+  onDownloadBackup: () => void;
+  onMove: () => void;
+}) {
+  const label = !status
+    ? { text: "Opening…", warn: false }
+    : readOnly
+      ? { text: "Open in another tab", warn: true }
+      : status.state === "error"
+        ? { text: "Not saved", warn: true }
+        : status.state === "saving"
+          ? { text: "Saving…", warn: false }
+          : { text: "Saved in this browser", warn: false };
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          variant="light"
+          className="h-10 gap-1.5 px-3"
+          title="Where this drawing is saved"
+          data-testid="storage-status"
+          data-state={status?.state ?? "opening"}
+        >
+          <span className={cn("flex items-center gap-1.5", label.warn && "text-destructive")}>
+            {status?.state === "saving" ? <LoaderCircle className="size-4 animate-spin" /> : <HardDrive className="size-4" />}
+            <span className="hidden lg:inline">{label.text}</span>
+          </span>
+          <span className="sr-only lg:hidden">{label.text}</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-[min(24rem,calc(100vw-1rem))] p-6" data-testid="storage-panel">
+        <h2 className="text-xl font-bold">Saved in this browser</h2>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+          This drawing is kept on this device, in this browser only, and saves as you go. It isn&rsquo;t on our server,
+          so it won&rsquo;t show up on your other devices, and clearing this site&rsquo;s data deletes it.
+        </p>
+        <div className="mt-3">
+          <Row label="Status" value={label.text} tone={label.warn ? "warn" : status?.state === "saved" ? "ok" : undefined} />
+          {status?.savedAt ? <Row label="Last saved" value={timeFormat.format(new Date(status.savedAt))} /> : null}
+        </div>
+        {message || status?.error || readOnly ? (
+          <p className="mt-4 rounded-lg border-l-4 border-cyan bg-beige-100 px-3 py-2 text-sm">
+            {message ??
+              status?.error ??
+              "You're editing this drawing in another tab. Close it there to edit it here; until then you can look, present and export."}
+          </p>
+        ) : null}
+        <div className="mt-5 flex flex-wrap gap-2">
+          {member ? (
+            <Button onClick={onMove} disabled={readOnly}>
+              Move to your account
+            </Button>
+          ) : (
+            <Button asChild>
+              <Link href="/pricing">Keep it in an account</Link>
+            </Button>
+          )}
+          <Button variant="secondary" onClick={onDownloadBackup}>
+            Download backup
+          </Button>
+        </div>
+        <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+          {member
+            ? "Moving it puts it in your account with its pictures, so it's on every device and you can share it."
+            : "Members' drawings are kept in their account, on every device. Becoming a member moves the drawings in this browser there."}
         </p>
       </PopoverContent>
     </Popover>

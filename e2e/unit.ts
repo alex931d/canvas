@@ -5,8 +5,9 @@
 // the study buddies' levels, streaks and lines, the seasonal themes' dates,
 // tracing pictures into strokes, frames as slides (order, what a frame
 // carries, the journey's camera path), who may do what in a team workspace,
-// and the board's own parts (the camera, drawing a stroke or shape, keys,
-// the clipboard, the tool registry).
+// the board's own parts (the camera, drawing a stroke or shape, keys, the
+// clipboard, the tool registry), and the free plan (what needs the
+// membership, saving in the browser).
 //   npm run test:unit
 import { balanceEquation } from "../src/lib/chem/balance";
 import { ELEMENTS } from "../src/lib/chem/elements";
@@ -50,6 +51,7 @@ import { buildGrid, clearLine, edgeSpots, findPath, freeSpots, isFree, nearestFr
 import { afterReview, levelUp } from "../src/lib/buddy/lines";
 import { accessoriesFor, DEFAULT_SETTINGS, levelFor, settingsSchema, streakFrom, type Progress } from "../src/lib/buddy/shared";
 import { CollabDoc, type RemoteChange } from "../src/lib/collab/doc";
+import { canUse, MEMBER_FEATURES } from "../src/lib/billing/plan";
 import { applyOps, type DocOp } from "../src/lib/collab/ops";
 import { compileExpression, ExprError, formatTick, niceStep } from "../src/lib/math/expr";
 import { easterSunday, resolveTheme, themeForDate } from "../src/lib/seasons";
@@ -265,6 +267,31 @@ const D = new CollabDoc({ elements: serverEls, version });
 D.restore([{ id: log[log.length - 1].b, ops: log[log.length - 1].ops }]);
 D.acknowledge([{ id: log[log.length - 1].b, version: log[log.length - 1].v }]);
 eq("restored batch already on server settles", D.getSnapshot().unsynced, 0);
+// the free plan: batches kept in this browser instead of on a server
+const Free = new CollabDoc({ elements: [t("base")], version: 0 });
+const settled: string[] = [];
+Free.connect({ onLocalBatch: () => {}, onSettled: (ids) => settled.push(...ids) });
+Free.dispatch({ type: "add", elements: [t("l1")] });
+Free.dispatch({ type: "add", elements: [t("l2")] });
+const firstTwo = Free.unsent().map((b) => b.id);
+Free.dispatch({ type: "add", elements: [t("l3")] });
+Free.confirmLocal(firstTwo);
+eq("confirming kept batches leaves later ones pending", [Free.getSnapshot().unsynced, Free.getSnapshot().version], [1, 2]);
+eq("and what's shown is unchanged", ids(Free.elements), "basel1l2l3");
+eq("settled batches are reported", settled, firstTwo);
+Free.confirmLocal(Free.unsent().map((b) => b.id));
+eq("with nothing pending, the saved copy is what's shown", [Free.serverElements === Free.elements, Free.getSnapshot().unsynced], [true, 0]);
+Free.dispatch({ type: "undo" });
+eq("undo still works after saving", ids(Free.elements), "basel1l2");
+// ------------------------------------------------ plans
+eq(
+  "only members can use member features",
+  (["math-check", "chemistry", "flashcards", "sharing", "workspaces", "server-storage"] as const).map(
+    (f) => `${canUse("free", f)}${canUse("member", f)}`,
+  ),
+  Array(6).fill("falsetrue"),
+);
+eq("every member feature has an upgrade prompt", Object.values(MEMBER_FEATURES).every((f) => f.title && f.text), true);
 // ------------------------------------------------ to-do boards
 let n = 0;
 const nid = () => `id${++n}`;

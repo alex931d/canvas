@@ -15,7 +15,7 @@
     "stripe:setup": "node scripts/stripe-setup.mjs",
     "membership": "node scripts/membership.mjs",
     "role": "node scripts/role.mjs",
-    "test:e2e": "node e2e/test-landing.mjs && node e2e/test-auth.mjs && node e2e/test-two-factor.mjs && node e2e/test-google.mjs && node e2e/test-account.mjs && node e2e/test-billing.mjs && node e2e/test.mjs && node e2e/test-quota.mjs && node e2e/test-input.mjs && node e2e/test-dock.mjs && node e2e/test-trace.mjs && node e2e/test-frames.mjs && node e2e/test-workspaces.mjs && node e2e/test-collab.mjs && node e2e/test-live.mjs && node e2e/test-study.mjs && node e2e/test-boards.mjs && node e2e/test-buddies.mjs && node e2e/test-wild.mjs && node e2e/test-admin.mjs && node e2e/test-seasons.mjs && node e2e/test-settings.mjs",
+    "test:e2e": "node e2e/test-landing.mjs && node e2e/test-auth.mjs && node e2e/test-two-factor.mjs && node e2e/test-google.mjs && node e2e/test-account.mjs && node e2e/test-billing.mjs && node e2e/test.mjs && node e2e/test-quota.mjs && node e2e/test-input.mjs && node e2e/test-dock.mjs && node e2e/test-free.mjs && node e2e/test-trace.mjs && node e2e/test-frames.mjs && node e2e/test-workspaces.mjs && node e2e/test-collab.mjs && node e2e/test-live.mjs && node e2e/test-study.mjs && node e2e/test-boards.mjs && node e2e/test-buddies.mjs && node e2e/test-wild.mjs && node e2e/test-admin.mjs && node e2e/test-seasons.mjs && node e2e/test-settings.mjs",
     "test:unit": "tsx e2e/unit.ts && tsx e2e/test-rate-limit.mts"
   },
   "dependencies": {

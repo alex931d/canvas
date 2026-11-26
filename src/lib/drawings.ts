@@ -6,6 +6,7 @@ import { cache } from "react";
 import { z } from "zod";
 import { db } from "@/db";
 import { assets, drawingMembers, drawings, users, workspaces, type MemberRole } from "@/db/schema";
+import { requireUser } from "@/lib/auth/session";
 import { requireMember } from "@/lib/billing/membership";
 import { getRole } from "@/lib/collab/access";
 import { normalizeDrawing, normalizePresentation } from "@/lib/canvas/schema";
@@ -87,6 +88,14 @@ export async function listSharedWithMe(): Promise<SharedDrawingSummary[]> {
     .leftJoin(users, eq(users.id, drawings.userId))
     .where(eq(drawingMembers.userId, user.id))
     .orderBy(desc(drawings.updatedAt));
+}
+
+/** How many drawings the signed-in user keeps in their account (shown when a membership has ended). */
+export async function countOwnDrawings(): Promise<number> {
+  await io();
+  const user = await requireUser();
+  const [row] = await db.select({ n: count() }).from(drawings).where(eq(drawings.userId, user.id));
+  return row?.n ?? 0;
 }
 
 export async function countImages(): Promise<number> {

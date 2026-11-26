@@ -1,5 +1,5 @@
 import { decompressFrame, parseGIF, type ParsedGif } from "gifuct-js";
-import type { LocalDrawingStore } from "@/lib/local-store/store";
+import type { LocalAsset } from "@/lib/local-store/idb";
 import type { MediaView } from "./render";
 import { MAX_ASSET_BYTES, MAX_VIDEO_BYTES, VIDEO_MIME_TYPES, type MediaElement } from "./schema";
 
@@ -360,6 +360,20 @@ export class VideoPlayer {
 
 type GifEntry = { status: "loading" } | { status: "ready"; player: GifPlayer } | { status: "error" };
 
+/**
+ * Where a drawing's files are kept in this browser. For members that's the
+ * local store, which also tracks what still has to be uploaded; on the free
+ * plan it's the browser library, and there is no server to upload to.
+ */
+export interface AssetStore {
+  getAssetBlob(id: string): Promise<Blob | null>;
+  /** False when the browser refused it (storage full). */
+  putAsset(asset: Omit<LocalAsset, "drawingId" | "savedAt">): Promise<boolean>;
+  pendingAssets?(): Promise<LocalAsset[]>;
+  markAssetUploaded?(id: string): void;
+  deleteAsset?(id: string): void;
+}
+
 export class AssetCache {
   private entries = new Map<string, Entry>();
   private gifs = new Map<string, GifEntry>();
@@ -374,9 +388,16 @@ export class AssetCache {
 
   constructor(
     private readonly drawingId: string,
-    private readonly store: () => LocalDrawingStore | null,
+    private readonly store: () => AssetStore | null,
     private readonly onChange: () => void,
+    /** False on the free plan: files are only ever in this browser. */
+    private readonly server = true,
   ) {}
+
+  /** Where to fetch a file this browser doesn't have; null when there's nowhere. */
+  private remoteUrl(id: string): string | null {
+    return this.server ? `/api/assets/${id}` : null;
+  }
 
   // -------------------------------------------------------------- reading
 
@@ -403,7 +424,9 @@ export class AssetCache {
     this.entries.set(id, { status: "loading" });
     try {
       const blob = await this.localBlob(id);
-      const img = await loadImage(blob ? this.objectUrl(id, blob) : `/api/assets/${id}`);
+      const url = blob ? this.objectUrl(id, blob) : this.remoteUrl(id);
+      if (!url) throw new Error("not in this browser");
+      const img = await loadImage(url);
       this.entries.set(id, { status: "ready", img });
       this.onChange();
     } catch {
@@ -428,9 +451,11 @@ export class AssetCache {
       let data = bytes;
       if (!data) {
         const blob = await this.localBlob(id);
+        const url = blob ? null : this.remoteUrl(id);
         if (blob) data = await blob.arrayBuffer();
         else {
-          const res = await fetch(`/api/assets/${id}`);
+          if (!url) throw new Error("not in this browser");
+          const res = await fetch(url);
           if (!res.ok) throw new Error(String(res.status));
           data = await res.arrayBuffer();
         }
@@ -458,7 +483,7 @@ export class AssetCache {
     // The copy in this browser if there is one; otherwise stream it from the
     // server, which answers range requests so playback starts straight away.
     const blob = await this.localBlob(id).catch(() => null);
-    const player = new VideoPlayer(blob ? this.objectUrl(id, blob) : `/api/assets/${id}`, this.onChange);
+    const player = new VideoPlayer(blob ? this.objectUrl(id, blob) : (this.remoteUrl(id) ?? ""), this.onChange);
     this.videos.set(id, { status: "ready", player });
     const unsubscribe = player.subscribe(() => {
       if (!player.getState().error) return;
@@ -598,7 +623,7 @@ export class AssetCache {
       const rejectedNow = [...referenced].filter((id) => this.rejected.has(id));
       if (rejectedNow.length) return { rejected: rejectedNow, message: "That file couldn't be saved." };
       const pending: (PendingAsset & { id: string })[] = [
-        ...(await (store?.pendingAssets() ?? Promise.resolve([]))).map((a) => ({
+        ...(await (store?.pendingAssets?.() ?? Promise.resolve([]))).map((a) => ({
           id: a.id,
           blob: a.blob,
           width: a.width,
@@ -623,12 +648,12 @@ export class AssetCache {
             const body = (await res.json().catch(() => ({}))) as { error?: string };
             this.rejected.add(p.id);
             this.memoryOnly.delete(p.id);
-            store?.deleteAsset(p.id);
+            store?.deleteAsset?.(p.id);
             return { rejected: [p.id], message: body.error ?? "That file couldn't be saved." };
           }
           if (!res.ok) throw new Error(String(res.status));
           this.memoryOnly.delete(p.id);
-          store?.markAssetUploaded(p.id);
+          store?.markAssetUploaded?.(p.id);
         } catch {
           result = "failed";
         }
@@ -643,9 +668,10 @@ export class AssetCache {
   /** The file's bytes, wherever they are (for backups). */
   async getBlob(id: string): Promise<Blob | null> {
     const local = await this.localBlob(id);
-    if (local) return local;
+    const url = local ? null : this.remoteUrl(id);
+    if (local || !url) return local;
     try {
-      const res = await fetch(`/api/assets/${id}`);
+      const res = await fetch(url);
       return res.ok ? await res.blob() : null;
     } catch {
       return null;

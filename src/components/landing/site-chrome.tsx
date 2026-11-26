@@ -27,7 +27,7 @@ export function Wordmark({ className }: { className?: string }) {
 
 const navLink = cn(linkFocus, "px-2 py-2 text-sm font-bold whitespace-nowrap underline-offset-4 hover:underline sm:px-3");
 
-/** Log in and Create account, for visitors who aren't signed in. */
+/** Log in, and the drawings in this browser (no account needed), for visitors who aren't signed in. */
 export function SignedOutLinks() {
   return (
     <>
@@ -35,7 +35,7 @@ export function SignedOutLinks() {
         Log in
       </Link>
       <Button asChild size="lg" className="px-4 sm:px-5">
-        <Link href="/signup">Create account</Link>
+        <Link href="/local">Open canvas</Link>
       </Button>
     </>
   );

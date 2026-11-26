@@ -1,6 +1,6 @@
 "use client";
 
-import { CreditCard, LogOut, PawPrint, Settings, ShieldCheck, Sparkles } from "lucide-react";
+import { CreditCard, LogIn, LogOut, PawPrint, Settings, ShieldCheck, Sparkles, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
@@ -117,6 +117,40 @@ export function HeaderUserMenu({ user, className }: { user: MenuUser; className?
         <Avatar name={user.name} src={user.avatarUrl} className="size-10" />
       </MenuTrigger>
       <AccountMenuContent user={user} onSignOut={run} pending={pending} side="bottom" />
+    </Menu>
+  );
+}
+
+/** For people drawing without an account: the way to log in, or to the membership. */
+export function GuestMenu({ next, className }: { next: string; className?: string }) {
+  return (
+    <Menu>
+      <MenuTrigger
+        aria-label="Account"
+        className={cn(
+          "grid size-10 place-items-center rounded-full bg-grey-900 text-white outline-none focus-visible:ring-2 focus-visible:ring-green",
+          className,
+        )}
+      >
+        <UserRound className="size-5" />
+      </MenuTrigger>
+      <MenuContent side="bottom" align="end" className="w-64">
+        <MenuLabel>
+          <span className="block font-bold">Drawing without an account</span>
+          <span className="block text-xs text-muted-foreground">Your drawings are saved in this browser.</span>
+        </MenuLabel>
+        <MenuSeparator />
+        <MenuItem asChild>
+          <Link href={`/login?next=${encodeURIComponent(next)}`}>
+            <LogIn /> Log in
+          </Link>
+        </MenuItem>
+        <MenuItem asChild>
+          <Link href="/pricing">
+            <CreditCard /> Get the membership
+          </Link>
+        </MenuItem>
+      </MenuContent>
     </Menu>
   );
 }

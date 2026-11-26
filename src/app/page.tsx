@@ -2,6 +2,7 @@ import { GalleryVerticalEnd, LayoutGrid, PawPrint, UsersRound } from "lucide-rea
 import { Suspense } from "react";
 import { StaffSidebarLink } from "@/components/admin/staff-sidebar-link";
 import { AppSidebar, SidebarLink } from "@/components/app-sidebar";
+import { NewBrowserDrawingButton } from "@/components/gallery/browser-gallery";
 import { NewDrawingButton } from "@/components/gallery/new-drawing-button";
 import { Overview, OverviewSkeleton } from "@/components/gallery/overview";
 import { HeaderUserSlot } from "@/components/header-user-slot";
@@ -21,6 +22,12 @@ async function SidebarUser() {
       {isMember ? <StudyBuddies /> : null}
     </>
   );
+}
+
+/** Members' new drawings go in their account; everyone else's in this browser. */
+async function NewDrawing() {
+  const user = await requireUser();
+  return (await getMembership(user.id)).isMember ? <NewDrawingButton /> : <NewBrowserDrawingButton />;
 }
 
 async function HeaderUser() {
@@ -52,7 +59,9 @@ export default function Home() {
           <header className="mb-8 flex items-center justify-between gap-4">
             <h1 className="text-[32px] leading-tight font-bold">Drawings</h1>
             <div className="flex items-center gap-3">
-              <NewDrawingButton />
+              <Suspense fallback={<span className="h-[53px] w-36" />}>
+                <NewDrawing />
+              </Suspense>
               <Suspense fallback={<HeaderUserSlot />}>
                 <HeaderUser />
               </Suspense>

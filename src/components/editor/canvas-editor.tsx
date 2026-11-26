@@ -9,6 +9,7 @@ import {
   FileImage,
   FileUp,
   FlaskConical,
+  Lock,
   Play,
   Presentation as PresentationIcon,
   Redo2,
@@ -31,8 +32,21 @@ import {
 } from "react";
 import { renameDrawing, savePresentation } from "@/app/actions";
 import { StudyBuddies } from "@/components/buddy/study-buddies";
-import { Badge, Button, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Tip, toast } from "@/components/kit";
-import { HeaderUserMenu, type MenuUser } from "@/components/user-menu";
+import { UpgradeDialog } from "@/components/billing/upgrade-dialog";
+import {
+  Badge,
+  Button,
+  ConfirmDialog,
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuSeparator,
+  MenuTrigger,
+  Tip,
+  toast,
+} from "@/components/kit";
+import { GuestMenu, HeaderUserMenu, type MenuUser } from "@/components/user-menu";
+import { canUse, type MemberFeature, type Plan } from "@/lib/billing/plan";
 import { emitBuddy } from "@/lib/buddy/events";
 import { finishedCards } from "@/lib/canvas/kanban";
 import { mathCheckSchema, type MathCheck } from "@/lib/ai/math-check-schema";
@@ -54,6 +68,8 @@ import { CollabDoc, type HistoryAction } from "@/lib/collab/doc";
 import { peerColor, type Peer } from "@/lib/collab/peers";
 import { PeerDrafts } from "@/lib/collab/peer-drafts";
 import { DrawingSync, type PresenceMessage, type SyncStatus } from "@/lib/collab/sync-client";
+import { BrowserDrawingSession, type BrowserSaveState } from "@/lib/local-store/browser-session";
+import { BrowserDrawingMover } from "@/lib/local-store/mover";
 import { LocalDrawingStore, type LocalStatus } from "@/lib/local-store/store";
 import { DEFAULT_PREFERENCES, type Preferences } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
@@ -64,7 +80,7 @@ import { PeerAvatars } from "./peer-avatars";
 import { Presenter } from "./presenter";
 import { ShareDialog } from "./share-dialog";
 import { SlidesPanel } from "./slides-panel";
-import { StoragePopover, type ServerState } from "./storage-panel";
+import { BrowserSavePopover, StoragePopover, type ServerState } from "./storage-panel";
 import { StyleBar } from "./style-bar";
 import { ToolDock } from "./tool-dock";
 import { ToolSearch, type SearchItem } from "./tool-search";
@@ -123,6 +139,8 @@ const INITIAL_STATUS: SyncStatus = {
 export function CanvasEditor({
   id,
   user,
+  storage = "server",
+  plan = "member",
   role: initialRole,
   ownerName,
   initialTitle,
@@ -133,7 +151,15 @@ export function CanvasEditor({
   preferences = DEFAULT_PREFERENCES,
 }: {
   id: string;
-  user: MenuUser;
+  /** Who's drawing; null for someone without an account (the free plan). */
+  user: MenuUser | null;
+  /**
+   * Where the drawing is kept: on the server (members), or only in this
+   * browser (the free plan; see src/lib/local-store/library.ts).
+   */
+  storage?: "server" | "browser";
+  /** Member features (math checks, chemistry, flashcards, sharing) need "member". */
+  plan?: Plan;
   role: Role;
   ownerName: string | null;
   initialTitle: string;
@@ -170,7 +196,11 @@ export function CanvasEditor({
 
   const [role, setRole] = useState<Role>(initialRole);
   const [ended, setEnded] = useState<"revoked" | "deleted" | null>(null);
-  const readOnly = role === "viewer" || ended !== null;
+  const browser = storage === "browser";
+  // On the free plan: another tab is editing this drawing, or it's on its way to the member's account.
+  const [openElsewhere, setOpenElsewhere] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const readOnly = role === "viewer" || ended !== null || openElsewhere || moving;
 
   const [toolChoice, setTool] = useState<Tool>(initialRole === "viewer" ? "select" : "pen");
   const tool: Tool = ToolRegistry.shared.allowed(toolChoice, readOnly) ? toolChoice : "select";
@@ -186,6 +216,20 @@ export function CanvasEditor({
   const [ready, setReady] = useState(false);
   const [images, setImages] = useState<AssetCache | null>(null);
   const [imageVersion, bumpImages] = useReducer((n: number) => n + 1, 0);
+
+  // The free plan: kept in this browser only (see src/lib/local-store/browser-session.ts)
+  const browserRef = useRef<BrowserDrawingSession | null>(null);
+  const [browserStatus, setBrowserStatus] = useState<BrowserSaveState | null>(null);
+  const [moveOpen, setMoveOpen] = useState(false);
+  /** A member feature someone on the free plan reached for: offer the membership. */
+  const [upgrade, setUpgrade] = useState<MemberFeature | null>(null);
+  /** True if this person can use `feature`; otherwise shows what the membership offers. */
+  const allow = (feature: MemberFeature) => {
+    if (canUse(plan, feature)) return true;
+    setUpgrade(feature);
+    return false;
+  };
+  const locked = (feature: MemberFeature) => !canUse(plan, feature);
 
   // Server sync and collaborators (see src/lib/collab)
   const syncRef = useRef<DrawingSync | null>(null);
@@ -259,7 +303,7 @@ export function CanvasEditor({
   });
 
   const onPresence = useEffectEvent((p: PresenceMessage) => {
-    if (p.u === user.id) return; // your own other tabs
+    if (p.u === user?.id) return; // your own other tabs
     if (p.bye) peerDrafts.forget(p.c);
     else peerDrafts.apply(p.c, p.dr);
     setPeers((prev) => {
@@ -286,8 +330,10 @@ export function CanvasEditor({
     else toast.success("You can edit this drawing now.", { id: "role" });
   });
 
+  const userId = user?.id ?? null;
   useEffect(() => {
-    const store = new LocalDrawingStore(id, user.id, clientId);
+    if (browser || !userId) return;
+    const store = new LocalDrawingStore(id, userId, clientId);
     storeRef.current = store;
     const unsubscribe = store.subscribe(setLocalStatus);
     let cancelled = false;
@@ -322,7 +368,7 @@ export function CanvasEditor({
         sync = new DrawingSync({
           drawingId: id,
           clientId,
-          userId: user.id,
+          userId,
           doc,
           images: () => cache,
           canEdit: () => !readOnlyRef.current,
@@ -352,7 +398,38 @@ export function CanvasEditor({
       cache?.dispose();
       storeRef.current = null;
     };
-  }, [id, user.id, clientId, doc]);
+  }, [browser, id, userId, clientId, doc]);
+
+  // The free plan: save into this browser's library as you go.
+  useEffect(() => {
+    if (!browser) return;
+    const session = new BrowserDrawingSession(id, doc);
+    browserRef.current = session;
+    const unsubscribe = session.subscribe(setBrowserStatus);
+    const cache = new AssetCache(id, () => session.assets, bumpImages, false);
+    let cancelled = false;
+    void session.open().then(({ editable }) => {
+      if (cancelled) return;
+      if (!editable) setOpenElsewhere(true);
+      setBrowserStatus(session.getStatus());
+      setImages(cache);
+      setReady(true);
+    });
+    // Leaving or hiding the page: write what's waiting now rather than in a moment.
+    const save = () => void session.flush();
+    const hidden = () => document.visibilityState === "hidden" && save();
+    window.addEventListener("pagehide", save);
+    document.addEventListener("visibilitychange", hidden);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("pagehide", save);
+      document.removeEventListener("visibilitychange", hidden);
+      unsubscribe();
+      void session.close();
+      cache.dispose();
+      browserRef.current = null;
+    };
+  }, [browser, id, doc]);
 
   // Forget people we haven't heard from (closed laptop, lost connection).
   useEffect(() => {
@@ -390,6 +467,10 @@ export function CanvasEditor({
     thumbVersion.current = version;
     const thumbnail = makeThumbnail({ version: 2, background, elements: doc.elements }, env);
     if (!thumbnail) return;
+    if (browser) {
+      await browserRef.current?.saveThumbnail(thumbnail).catch(() => (thumbVersion.current = -1));
+      return;
+    }
     try {
       const res = await fetch(`/api/drawings/${id}/thumbnail`, {
         method: "POST",
@@ -410,6 +491,7 @@ export function CanvasEditor({
   // Warn before leaving only if something could actually be lost.
   const hasUnsavedRisk = useEffectEvent(
     () =>
+      (browser && snap.unsynced > 0) ||
       (localStatus?.pendingWrites ?? 0) > 0 ||
       (localMode !== "indexeddb" && (snap.unsynced > 0 || syncStatus.sending)) ||
       (images?.hasUnuploaded(assetIdsOf(elements)) ?? false),
@@ -484,6 +566,17 @@ export function CanvasEditor({
       setTitle(savedTitle);
       return;
     }
+    if (browser) {
+      try {
+        await browserRef.current?.rename(next);
+        setSavedTitle(next);
+        setTitle(next);
+      } catch {
+        setTitle(savedTitle);
+        toast.error("Couldn't rename it: this browser didn't save the change.");
+      }
+      return;
+    }
     try {
       const res = await renameDrawing(id, next);
       if (res.ok) {
@@ -501,6 +594,13 @@ export function CanvasEditor({
   async function changePresentation(next: Presentation) {
     const before = presentation;
     setPresentation(next);
+    if (browser) {
+      await browserRef.current?.savePresentation(next).catch(() => {
+        setPresentation(before);
+        toast.error("Couldn't save the slide style in this browser.");
+      });
+      return;
+    }
     try {
       const res = await savePresentation(id, next);
       if (!res.ok) {
@@ -512,6 +612,36 @@ export function CanvasEditor({
       toast.error("Couldn't save the slide style: the server is unreachable. Try again when you're back online.");
     }
   }
+
+  /** A member's drawing from this browser goes into their account, then opens from there. */
+  async function moveToAccount() {
+    setMoving(true);
+    try {
+      await browserRef.current?.flush();
+      await BrowserDrawingMover.shared.moveOne(id);
+      toast.success("Moved to your account.", { id: "moved" });
+      router.replace(`/drawings/${id}`);
+    } catch (err) {
+      setMoving(false);
+      setMoveOpen(false);
+      toast.error(err instanceof Error ? err.message : "It couldn't be moved. It's still in this browser.");
+    }
+  }
+
+  /** Share: on the server, the sharing dialog; in this browser, the way there. */
+  function share() {
+    if (!allow("sharing")) return;
+    if (browser) setMoveOpen(true);
+    else setShareOpen(true);
+  }
+
+  const startMathCheck = () => {
+    if (allow("math-check")) boardRef.current?.startMathCheck();
+  };
+  const toggleChemistry = () => {
+    if (chemOpen || allow("chemistry")) setChemOpen(!chemOpen);
+  };
+  const MEMBERS_HINT = "Part of the membership";
 
   const updateFrame = (frame: FrameElement, patch: Partial<FrameElement>) =>
     doc.dispatch({ type: "update", elements: [{ ...frame, ...patch }] });
@@ -556,17 +686,31 @@ export function CanvasEditor({
     {
       id: "check",
       label: "Check math",
-      hint: "Loop around an equation and the AI checks each step",
+      hint: locked("math-check") ? MEMBERS_HINT : "Loop around an equation and the AI checks each step",
       words: "ai verify answer",
       Icon: Sparkles,
-      run: () => boardRef.current?.startMathCheck(),
+      run: startMathCheck,
     },
     { id: "slides", label: "Slides", hint: "Frames as slides: order, style, present", words: "presentation frames", Icon: PresentationIcon, run: () => setSlidesOpen(true) },
     ...(slides.length
       ? [{ id: "present", label: "Present", hint: "Show the slides full screen", words: "slideshow presentation", Icon: Play, run: () => present(null) }]
       : []),
-    { id: "chemistry", label: "Chemistry", hint: "Molar mass, balancing, the periodic table", words: "chem elements molar", Icon: FlaskConical, run: () => setChemOpen(true) },
-    { id: "share", label: "Share", hint: "Invite people to draw with you, live", words: "invite collaborate link", Icon: Share2, run: () => setShareOpen(true) },
+    {
+      id: "chemistry",
+      label: "Chemistry",
+      hint: locked("chemistry") ? MEMBERS_HINT : "Molar mass, balancing, the periodic table",
+      words: "chem elements molar",
+      Icon: FlaskConical,
+      run: () => allow("chemistry") && setChemOpen(true),
+    },
+    {
+      id: "share",
+      label: "Share",
+      hint: locked("sharing") ? MEMBERS_HINT : "Invite people to draw with you, live",
+      words: "invite collaborate link",
+      Icon: Share2,
+      run: share,
+    },
     { id: "export", label: "Export PNG", hint: "A picture of the whole drawing", words: "download image save", Icon: FileImage, run: exportPng },
     { id: "backup", label: "Download backup", hint: "The drawing as a .json file", words: "save export json", Icon: FileDown, run: () => void downloadBackup() },
     ...(readOnly
@@ -666,7 +810,19 @@ export function CanvasEditor({
   // ------------------------------------------------------------------ UI
 
   const banner =
-    ended === "deleted"
+    browser && openElsewhere
+      ? {
+          text: "This drawing is open in another tab, so it can only be changed there. Close it there to edit it here.",
+          action: "Download backup",
+          onAction: downloadBackup,
+        }
+      : browser && browserStatus?.state === "error"
+        ? {
+            text: browserStatus.error ?? "Your latest changes couldn't be saved in this browser.",
+            action: "Download backup",
+            onAction: downloadBackup,
+          }
+        : ended === "deleted"
       ? {
           text: "The owner deleted this drawing. What you see is no longer saved anywhere; download a backup to keep it.",
           action: "Download backup",
@@ -696,11 +852,12 @@ export function CanvasEditor({
 
   return (
     <div className="flex min-h-dvh flex-col">
-      <StudyBuddies />
+      {/* Study buddies are part of the membership. */}
+      {plan === "member" && user ? <StudyBuddies /> : null}
       <main className="flex h-dvh min-w-0 flex-1 flex-col gap-3 p-3 md:gap-4 md:px-6 md:pt-5 md:pb-5">
         <header className="flex items-center gap-2 md:gap-3">
           <Button asChild variant="ghost" size="icon-md" aria-label="All drawings">
-            <Link href="/">
+            <Link href={browser && !user ? "/local" : "/"}>
               <ArrowLeft />
             </Link>
           </Button>
@@ -730,29 +887,42 @@ export function CanvasEditor({
             </Badge>
           ) : null}
 
-          <StoragePopover
-            local={localStatus}
-            server={serverState}
-            serverError={syncStatus.error}
-            lastSyncedAt={syncStatus.lastSyncedAt ? new Date(syncStatus.lastSyncedAt).toISOString() : serverUpdatedAt}
-            live={syncStatus.connection}
-            message={panelMessage}
-            onFreeUpSpace={freeUpSpace}
-            onDownloadBackup={downloadBackup}
-          />
+          {browser ? (
+            <BrowserSavePopover
+              status={browserStatus}
+              readOnly={openElsewhere}
+              member={plan === "member" && !!user}
+              message={panelMessage}
+              onDownloadBackup={downloadBackup}
+              onMove={() => setMoveOpen(true)}
+            />
+          ) : (
+            <StoragePopover
+              local={localStatus}
+              server={serverState}
+              serverError={syncStatus.error}
+              lastSyncedAt={syncStatus.lastSyncedAt ? new Date(syncStatus.lastSyncedAt).toISOString() : serverUpdatedAt}
+              live={syncStatus.connection}
+              message={panelMessage}
+              onFreeUpSpace={freeUpSpace}
+              onDownloadBackup={downloadBackup}
+            />
+          )}
 
           <Tip
             content={
-              role === "owner" ? "Invite people to draw with you, live" : `Shared by ${ownerName ?? "the owner"}`
+              locked("sharing")
+                ? "Drawing together is part of the membership"
+                : browser
+                  ? "Move it to your account to share it"
+                  : role === "owner"
+                    ? "Invite people to draw with you, live"
+                    : `Shared by ${ownerName ?? "the owner"}`
             }
           >
-            <Button
-              variant="light"
-              className={cn(BAR_BUTTON, "max-sm:hidden")}
-              onClick={() => setShareOpen(true)}
-              aria-label="Share"
-            >
+            <Button variant="light" className={cn(BAR_BUTTON, "max-sm:hidden")} onClick={share} aria-label="Share">
               <Share2 /> <span className="max-lg:hidden">Share</span>
+              {locked("sharing") ? <Lock className="size-3.5 opacity-60 max-lg:hidden" aria-label="Members" /> : null}
             </Button>
           </Tip>
 
@@ -795,15 +965,22 @@ export function CanvasEditor({
             </Button>
           </Tip>
 
-          <Tip content="Molar mass, balancing equations and the periodic table">
+          <Tip
+            content={
+              locked("chemistry")
+                ? "The chemistry tools are part of the membership"
+                : "Molar mass, balancing equations and the periodic table"
+            }
+          >
             <Button
               variant="light"
               className={cn(BAR_BUTTON, "max-sm:hidden")}
-              onClick={() => setChemOpen(!chemOpen)}
+              onClick={toggleChemistry}
               aria-label="Chemistry"
               aria-pressed={chemOpen}
             >
               <FlaskConical /> <span className="max-xl:hidden">Chemistry</span>
+              {locked("chemistry") ? <Lock className="size-3.5 opacity-60 max-xl:hidden" aria-label="Members" /> : null}
             </Button>
           </Tip>
 
@@ -815,14 +992,16 @@ export function CanvasEditor({
               </Button>
             </MenuTrigger>
             <MenuContent align="end" className="w-56">
-              <MenuItem onSelect={() => setShareOpen(true)}>
+              <MenuItem onSelect={share}>
                 <Share2 /> Share
+                {locked("sharing") ? <Lock className="ml-auto size-3.5 opacity-60" aria-label="Members" /> : null}
               </MenuItem>
               <MenuItem onSelect={() => setSlidesOpen(!slidesOpen)}>
                 <PresentationIcon /> {slidesOpen ? "Close slides" : "Slides"}
               </MenuItem>
-              <MenuItem onSelect={() => setChemOpen(!chemOpen)}>
+              <MenuItem onSelect={toggleChemistry}>
                 <FlaskConical /> {chemOpen ? "Close chemistry" : "Chemistry"}
+                {locked("chemistry") ? <Lock className="ml-auto size-3.5 opacity-60" aria-label="Members" /> : null}
               </MenuItem>
               <MenuSeparator />
               <MenuItem onSelect={exportPng}>
@@ -839,18 +1018,26 @@ export function CanvasEditor({
             </MenuContent>
           </Menu>
 
-          <Tip content="Draw a loop around an equation and the AI checks each step">
+          <Tip
+            content={
+              locked("math-check")
+                ? "Checking math is part of the membership"
+                : "Draw a loop around an equation and the AI checks each step"
+            }
+          >
             <Button
               className={cn(BAR_BUTTON, "bg-green hover:bg-[#1f6965]")}
-              onClick={() => boardRef.current?.startMathCheck()}
+              onClick={startMathCheck}
               disabled={!ready}
               aria-label="Check math"
+              data-locked={locked("math-check") || undefined}
             >
               <Sparkles /> <span className="max-sm:hidden">Check math</span>
+              {locked("math-check") ? <Lock className="size-3.5 opacity-80 max-sm:hidden" aria-label="Members" /> : null}
             </Button>
           </Tip>
 
-          <HeaderUserMenu user={user} />
+          {user ? <HeaderUserMenu user={user} /> : <GuestMenu next={`/local/${id}`} />}
         </header>
 
         {banner ? (
@@ -880,13 +1067,15 @@ export function CanvasEditor({
             images={images}
             imageVersion={imageVersion}
             onCheckMath={checkMath}
+            mathCheckLocked={locked("math-check")}
+            onLocked={setUpgrade}
             readOnly={readOnly}
             drawEffect={preferences.drawEffect}
             boardEffects={preferences.boardEffects}
             peers={peers}
             onPointerWorld={onPointerWorld}
             onSelectionChange={onSelectionChange}
-            onMakeFlashcard={setFlashcard}
+            onMakeFlashcard={(capture) => allow("flashcards") && setFlashcard(capture)}
             onTracePicture={() => traceInputRef.current?.click()}
             onOpenFrame={(frameId) => {
               setSlidesOpen(true);
@@ -980,15 +1169,37 @@ export function CanvasEditor({
         onPickAnother={() => traceInputRef.current?.click()}
       />
 
-      <FlashcardDialog capture={flashcard} drawingId={id} deck={savedTitle} onClose={() => setFlashcard(null)} />
-
-      <ShareDialog
-        drawingId={id}
-        title={savedTitle}
-        me={{ id: user.id, name: user.name, avatarUrl: user.avatarUrl }}
-        open={shareOpen}
-        onOpenChange={setShareOpen}
+      <FlashcardDialog
+        capture={flashcard}
+        drawingId={browser ? null : id}
+        deck={savedTitle}
+        onClose={() => setFlashcard(null)}
       />
+
+      {!browser && user ? (
+        <ShareDialog
+          drawingId={id}
+          title={savedTitle}
+          me={{ id: user.id, name: user.name, avatarUrl: user.avatarUrl }}
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+        />
+      ) : null}
+
+      <UpgradeDialog feature={upgrade} onClose={() => setUpgrade(null)} />
+
+      {browser ? (
+        <ConfirmDialog
+          open={moveOpen}
+          onOpenChange={(open) => !moving && setMoveOpen(open)}
+          title="Move this drawing to your account?"
+          description="It's uploaded with its pictures, so it's on every device you sign in on and you can share it. The copy in this browser is removed once your account has it."
+          confirmLabel={moving ? "Moving…" : "Move it"}
+          tone="primary"
+          pending={moving}
+          onConfirm={() => void moveToAccount()}
+        />
+      ) : null}
 
       <input
         ref={imageInputRef}

@@ -286,6 +286,24 @@ export class CollabDoc {
     else this.emit();
   }
 
+  /**
+   * These batches are kept for good somewhere that isn't a server (on the
+   * free plan, this browser's storage), with nobody else to hear from: they
+   * become part of `server` in the order they were made. What's shown
+   * doesn't change, and once nothing is pending, `server` is the very same
+   * array as what's shown (render caches stay warm).
+   */
+  confirmLocal(ids: string[]) {
+    const set = new Set(ids);
+    const done = this.pending.filter((b) => set.has(b.id));
+    if (done.length === 0) return;
+    this.pending = this.pending.filter((b) => !set.has(b.id));
+    this.server = this.pending.length ? done.reduce((els, b) => applyOps(els, b.ops), this.server) : this.shown;
+    this.version += done.length;
+    this.emit();
+    this.handlers?.onSettled(done.map((b) => b.id));
+  }
+
   /** A change from the live stream. "gap" = we missed some: reload the drawing. */
   applyRemote(change: RemoteChange): "applied" | "stale" | "gap" {
     if (change.v <= this.version) return "stale";

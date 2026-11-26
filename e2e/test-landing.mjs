@@ -46,7 +46,9 @@ const outline = await page.evaluate(() => ({
   landmarks: ["header", "main", "footer"].every((t) => document.querySelector(t)),
   imgsWithoutAlt: [...document.querySelectorAll("img")].filter((i) => !i.getAttribute("alt")).length,
   demo: document.querySelector("figure[role=img]")?.getAttribute("aria-label") ?? "",
-  signup: [...document.querySelectorAll("a[href='/signup']")].map((a) => a.textContent.trim()),
+  start: [...document.querySelectorAll("a[href='/local/new']")].map((a) => a.textContent.trim()),
+  canvas: [...document.querySelectorAll("header a[href='/local']")].map((a) => a.textContent.trim()),
+  signup: [...document.querySelectorAll("a[href='/signup']")].length,
   pricing: [...document.querySelectorAll("a[href='/pricing']")].map((a) => a.textContent.trim()),
   login: [...document.querySelectorAll("a[href='/login']")].map((a) => a.textContent.trim()),
   text: document.body.innerText,
@@ -54,25 +56,31 @@ const outline = await page.evaluate(() => ({
 check("one h1, then a heading per section", outline.h1.length === 1 && outline.h2.length === 5, outline.h2.join(" | "));
 check("header, main and footer landmarks", outline.landmarks);
 check(
-  "the $5 membership is on the page, self-hosting isn't",
-  /\$5 a month\. Cancel any time\./.test(outline.text) &&
-    /One membership, \$5 a month/.test(outline.text) &&
+  "drawing for free and the $5 membership are on the page, self-hosting isn't",
+  /Free, with no account: drawings save in your browser\./.test(outline.text) &&
+    /Start free\. Join when you want more\./.test(outline.text) &&
+    /\$5\s*a month/.test(outline.text) &&
     !/Run your own copy|docker compose/.test(outline.text),
 );
 check("every image has alt text", outline.imgsWithoutAlt === 0);
 check("the hero demo is described for screen readers", /mistake/.test(outline.demo) && /x should be 11/.test(outline.demo));
 check(
-  "sign-up links in the header and hero, login links in the header, hero and closing section",
-  outline.signup.length === 2 && outline.signup.every((t) => t === "Create account") && outline.login.length === 3,
-  `${outline.signup.length} / ${outline.login.length}`,
+  "Start drawing in the hero and the closing section, no account needed",
+  outline.start.length === 2 && outline.start.every((t) => t === "Start drawing") && outline.signup === 0,
+  `${outline.start.join(" | ")} / ${outline.signup}`,
+);
+check(
+  "the header opens the canvas and has the one login link",
+  outline.canvas.join() === "Open canvas" && outline.login.length === 1,
+  `${outline.canvas.join()} / ${outline.login.length}`,
 );
 check(
   "the pricing page is linked from the header, the hero and the closing section",
-  ["Pricing", "See what's included", "Get membership"].every((t) => outline.pricing.includes(t)),
+  ["Pricing", "See the membership", "Compare the plans"].every((t) => outline.pricing.includes(t)),
   outline.pricing.join(" | "),
 );
 
-// keyboard: wordmark, Pricing, Log in, Create account, with a visible focus ring
+// keyboard: wordmark, Pricing, Log in, Open canvas, with a visible focus ring
 for (let i = 0; i < 4; i++) await page.keyboard.press("Tab");
 await sleep(300); // the button's ring fades in (transition-all)
 const focused = await page.evaluate(() => ({
@@ -80,8 +88,8 @@ const focused = await page.evaluate(() => ({
   ring: getComputedStyle(document.activeElement).boxShadow,
 }));
 check(
-  "keyboard reaches Create account with a visible focus ring",
-  focused.text === "Create account" && / 3px/.test(focused.ring),
+  "keyboard reaches Open canvas with a visible focus ring",
+  focused.text === "Open canvas" && / 3px/.test(focused.ring),
   focused.ring.match(/[^,]* 3px/)?.[0] ?? focused.ring,
 );
 
@@ -95,8 +103,9 @@ const shot = await page.$eval("img[alt^='The canvas editor']", (img) => ({ w: im
 check("the editor screenshot loads as an optimised image", shot.w > 0 && /\/_next\/image\?/.test(shot.src), `${shot.w}px`);
 
 await page.evaluate(() => scrollTo(0, 0));
-await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.click("header a[href='/signup']")]);
-check("Create account opens the sign-up page", new URL(page.url()).pathname === "/signup");
+await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.click("header a[href='/local']")]);
+check("Open canvas opens this browser's drawings, no account needed", new URL(page.url()).pathname === "/local");
+await page.goto(`${BASE}/signup`, { waitUntil: "networkidle0" });
 await Promise.all([page.waitForNavigation({ waitUntil: "networkidle0" }), page.click("aside a[href='/']")]);
 check("the wordmark on the auth pages leads back to the landing page", /Sketch it/.test(await page.$eval("h1", (h) => h.textContent)));
 
@@ -164,14 +173,16 @@ const ctxB = await browser.createBrowserContext();
     updated: document.querySelector("time")?.getAttribute("datetime"),
   }));
   check(
-    "it has its title, a date and twelve numbered sections",
-    terms.h1 === "Terms of service" && /^\d{4}-\d{2}-\d{2}$/.test(terms.updated ?? "") && terms.sections.length === 12 && /^1\./.test(terms.sections[0]),
+    "it has its title, a date and thirteen numbered sections",
+    terms.h1 === "Terms of service" && /^\d{4}-\d{2}-\d{2}$/.test(terms.updated ?? "") && terms.sections.length === 13 && /^1\./.test(terms.sections[0]),
     `${terms.h1} ${terms.updated} ${terms.sections.length}`,
   );
   check("the contents link to every section", terms.contents.join() === terms.ids.join(), terms.contents.join());
   check(
-    "the membership terms quote the plan's price and how to cancel",
-    /It costs \$5 a month in US dollars/.test(terms.text) && /cancel any time from the Membership page/.test(terms.text),
+    "the membership terms quote the plan's price and how to cancel, and say where free drawings are kept",
+    /The membership costs \$5 a month in US dollars/.test(terms.text) &&
+      /cancel any time from the Membership page/.test(terms.text) &&
+      /saved in your browser on your device/.test(terms.text),
   );
   await tp.click("nav[aria-labelledby=contents-title] a[href='#ai']");
   await sleep(300);
