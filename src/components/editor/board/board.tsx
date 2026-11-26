@@ -54,6 +54,7 @@ import {
 } from "@/lib/canvas/schema";
 import type { MathCheck } from "@/lib/ai/math-check-schema";
 import type { HistoryAction } from "@/lib/collab/doc";
+import type { PeerDrafts } from "@/lib/collab/peer-drafts";
 import type { Peer } from "@/lib/collab/peers";
 import { subscribeMath, texSource, typesetMath } from "@/lib/math/layout";
 import type { DrawEffect } from "@/lib/preferences";
@@ -68,6 +69,7 @@ import { BoardClipboard, cloneElements } from "./clipboard";
 import { DraftSession } from "./drafts";
 import { frameBox, hitForSelect, nextSlide, withFrameContents } from "./frames";
 import { corners } from "./overlays";
+import { AvatarImages } from "./avatars";
 import { BoardPainter, type PaintFrame } from "./painter";
 import {
   equationEditorSpot,
@@ -119,6 +121,8 @@ export function Board({
   onTracePicture,
   onOpenFrame,
   onPresentFrame,
+  onDraft,
+  peerDrafts,
   ref,
 }: {
   drawingId: string;
@@ -151,6 +155,10 @@ export function Board({
   onOpenFrame?: (id: string) => void;
   /** Present the slides, starting from this frame. */
   onPresentFrame?: (id: string) => void;
+  /** The stroke or shape being drawn here (changed in place as it grows), or null when it ends: shared live. */
+  onDraft?: (draft: CanvasElement | null) => void;
+  /** What other people are drawing right now, to draw as it grows. */
+  peerDrafts?: PeerDrafts;
   ref?: Ref<BoardHandle>;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -181,6 +189,7 @@ export function Board({
     editingId: null as string | null,
     graphPreview: null as GraphElement | null,
     peers: [] as Peer[],
+    peerDrafts: undefined as PeerDrafts | undefined,
     readOnly: false,
   });
   const interRef = useRef<Interaction>({ kind: "none" });
@@ -224,6 +233,7 @@ export function Board({
       editingId: editing?.id ?? null,
       graphPreview,
       peers,
+      peerDrafts,
       readOnly,
     };
   });
@@ -281,6 +291,10 @@ export function Board({
 
   // ------------------------------------------------------------ rendering
 
+  const [painter] = useState(() => new BoardPainter());
+  const paint = painter.paint;
+  const schedulePaint = painter.schedule;
+
   /** One painted frame's worth of the board, read from refs (so the painter never needs remaking). */
   const readFrame = (): PaintFrame | null => {
     const canvas = canvasRef.current;
@@ -301,7 +315,7 @@ export function Board({
       skip: p.editingId ? new Set([...hidden, p.editingId]) : hidden,
       // A fresh copy each frame, so render caches never hold a half-finished shape.
       draft: inter.kind === "draw" ? inter.session.snapshot() : null,
-      peerDrafts: [],
+      peerDrafts: drawnPeerDrafts(),
       fx: fxRef.current,
       overlay: {
         interaction: inter,
@@ -312,13 +326,35 @@ export function Board({
         lassoRegion: p.lassoRegion,
         eraser: p.tool === "eraser" && hover && !spaceRef.current ? { at: hover, size: p.style.eraserSize } : null,
         peers: p.peers,
+        avatar: (peer) => (peer.avatarUrl ? AvatarImages.shared.get(peer.avatarUrl, schedulePaint) : null),
       },
     };
   };
-  const [painter] = useState(() => new BoardPainter());
+
+  /** Ids on the board now, for telling which peers' drafts have landed. */
+  const elementIdsRef = useRef<Set<string>>(new Set());
+  useLayoutEffect(() => {
+    elementIdsRef.current = new Set(elements.map((e) => e.id));
+  }, [elements]);
+  // A draft whose finished element never comes (someone's click, not a stroke) goes after a moment.
+  useEffect(() => {
+    if (!peers.length) return;
+    const t = setTimeout(schedulePaint, 1700);
+    return () => clearTimeout(t);
+  }, [peers, schedulePaint]);
+  /**
+   * Other people's strokes and shapes as they draw them. Each is noted as
+   * already on screen, so it doesn't play an entrance when it lands.
+   */
+  const drawnPeerDrafts = () => {
+    const drafts = propsRef.current.peerDrafts;
+    if (!drafts) return [];
+    const ids = elementIdsRef.current;
+    const list = drafts.visible((id) => ids.has(id));
+    for (const d of list) ownAddsRef.current.add(d.id);
+    return list;
+  };
   useLayoutEffect(() => painter.connect(readFrame));
-  const paint = painter.paint;
-  const schedulePaint = painter.schedule;
 
   useEffect(() => {
     schedulePaint();
@@ -925,6 +961,7 @@ export function Board({
     if (!session) return false;
     holdScene();
     interRef.current = { kind: "draw", session };
+    onDraft?.(session.draft);
     setSelected([]);
     setLassoRegion(null);
     return true;
@@ -984,6 +1021,7 @@ export function Board({
       hiddenRef.current.clear();
       overridesRef.current = null;
       painter.release();
+      if (interRef.current.kind === "draw") onDraft?.(null);
       interRef.current = {
         kind: "pinch",
         dist0: Math.hypot(a.x - b.x, a.y - b.y),
@@ -1166,6 +1204,7 @@ export function Board({
         } else {
           session.reshape(p, e.shiftKey, style.frameAspect);
         }
+        onDraft?.(session.draft);
         break;
       }
       case "erase": {
@@ -1240,6 +1279,7 @@ export function Board({
     }
     interRef.current = { kind: "none" };
     painter.release();
+    if (inter.kind === "draw") onDraft?.(null);
 
     if (!cancelled) {
       switch (inter.kind) {

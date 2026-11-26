@@ -151,7 +151,7 @@ let v = await view(a, id);
 await a.keyboard.press("k");
 check(
   "K picks the to-do board tool",
-  !!(await waitFor(() => a.$("aside button[aria-label='To-do board'][aria-pressed=true]"), 2000)),
+  !!(await waitFor(() => a.$("[data-testid=tool-dock] button[data-tool='To-do board'][aria-pressed=true]"), 2000)),
 );
 await click(a, { x: v.rect.x + 520, y: v.rect.y + 160 });
 await dialog(a, "New card");
@@ -513,7 +513,7 @@ await bPage.evaluate((key, cam) => localStorage.setItem(key, JSON.stringify(cam)
 await bPage.reload({ waitUntil: "load" });
 await bPage.waitForSelector("[data-testid=board]");
 await sleep(1500);
-check("viewers don't get the to-do board tool", !(await bPage.$("aside button[aria-label='To-do board']")));
+check("viewers don't get the to-do board tool", !(await bPage.$("[data-testid=tool-dock] [data-items*='To-do board']")));
 const bGif = await (async () => {
   const vb = await view(bPage, id);
   const tl = vb.at(gif.x, gif.y);

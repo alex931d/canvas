@@ -4,11 +4,14 @@ import { limiters } from "@/lib/auth/rate-limit";
 import { getMembership } from "@/lib/billing/membership";
 import { getRole } from "@/lib/collab/access";
 import { notify } from "@/lib/collab/notify";
+import { elementSchema } from "@/lib/canvas/schema";
+import { MAX_PIECE_COORDS } from "@/lib/collab/peer-drafts";
 import { clientIdSchema } from "@/lib/collab/route-auth";
 
 /**
- * Where someone's cursor is and what they have selected, passed straight on
- * to the others looking at the drawing. Nothing is stored. Browsers only
+ * Where someone's cursor is, what they have selected and what they're
+ * drawing right now, passed straight on to the others looking at the
+ * drawing. Nothing is stored. Browsers only
  * send these while someone else has the drawing open, but then many times a
  * second, so the sign-in and access checks are remembered for 10 s and the
  * rate limit is counted in this server's memory: a cursor update normally
@@ -16,10 +19,17 @@ import { clientIdSchema } from "@/lib/collab/route-auth";
  */
 
 const coord = z.number().finite().min(-1e7).max(1e7);
+const DRAFT_TYPES = new Set(["stroke", "eraser", "line", "rect", "ellipse", "graph", "frame"]);
+/** A piece of a stroke or shape in progress (src/lib/collab/peer-drafts.ts): small, and only things drawn by dragging. */
+const draftSchema = z
+  .object({ from: z.number().int().min(0).max(40_000), el: elementSchema })
+  .refine((d) => DRAFT_TYPES.has(d.el.type), "Not something drawn by dragging")
+  .refine((d) => !("points" in d.el) || d.el.points.length <= MAX_PIECE_COORDS, "Too many points in one piece");
 const bodySchema = z.object({
   clientId: clientIdSchema,
   cursor: z.object({ x: coord, y: coord }).nullable(),
   selection: z.array(z.string().min(1).max(64)).max(50),
+  draft: draftSchema.nullable().optional(),
   hello: z.boolean().optional(),
 });
 
@@ -65,6 +75,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/drawings/[i
     a: user.avatarUrl,
     cur: body.cursor,
     sel: body.selection,
+    ...(body.draft !== undefined ? { dr: body.draft } : {}),
     ...(body.hello ? { hello: true } : {}),
   });
   return new Response(null, { status: 204 });

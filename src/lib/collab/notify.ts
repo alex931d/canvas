@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { Presentation } from "@/lib/canvas/schema";
+import type { DraftPiece } from "./peer-drafts";
 import { bus } from "./bus";
 import { hub } from "./hub";
 
@@ -30,6 +31,8 @@ export type HubMessage =
       a?: string | null;
       cur: { x: number; y: number } | null;
       sel: string[];
+      /** A piece of what they're drawing, or null when they've stopped (see peer-drafts.ts). */
+      dr?: DraftPiece | null;
       hello?: boolean;
       bye?: boolean;
     }

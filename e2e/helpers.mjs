@@ -92,3 +92,41 @@ export async function logIn(page, { email, password = PASSWORD }, next) {
 
 /** Name of the signed-in user's IndexedDB database. */
 export const localDbName = (userId) => `canvas-local:${userId}`;
+
+/**
+ * Pick a tool (or Image or video, Trace a picture) from the editor's dock by
+ * name: its own button, or from the group it's tucked into, opening that
+ * group's list the way a person would (its arrow, or pressing it again).
+ */
+export async function pickTool(page, label) {
+  const dock = "[data-testid=tool-dock]";
+  // The dock comes alive once the drawing has loaded.
+  await page.waitForSelector(`${dock}:not([aria-disabled=true])`, { timeout: 15_000 });
+  const direct = await page.$(`${dock} button[data-tool="${label}"]`);
+  if (direct) {
+    const pressed = await direct.evaluate((b) => b.getAttribute("aria-pressed") === "true");
+    if (!pressed) await direct.click();
+    return;
+  }
+  const slots = await page.$$(`${dock} [data-items]`);
+  let slot = null;
+  for (const s of slots) {
+    const items = await s.evaluate((n) => n.dataset.items.split(","));
+    if (items.includes(label)) slot = s;
+  }
+  if (!slot) throw new Error(`no tool called ${label} in the dock`);
+  const opened = () => page.$("[data-ui=menu] [role=menuitem]");
+  const arrow = await slot.$("button[aria-label^='More']");
+  if (arrow && (await arrow.boundingBox())) await arrow.click();
+  else {
+    const main = await slot.$("button[aria-pressed]");
+    await main.click();
+    await sleep(150);
+    if (!(await opened())) await main.click();
+  }
+  const item = await page.waitForSelector(`xpath/.//*[@data-ui='menu']//*[@role='menuitem'][.//span[normalize-space()="${label}"]]`, {
+    timeout: 5000,
+  });
+  await item.click();
+  await sleep(100);
+}

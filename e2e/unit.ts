@@ -18,6 +18,8 @@ import { BoardClipboard, cloneElements } from "../src/components/editor/board/cl
 import { DraftSession } from "../src/components/editor/board/drafts";
 import { frameBox, nextSlide, withFrameContents } from "../src/components/editor/board/frames";
 import { Shortcuts } from "../src/components/editor/board/shortcuts";
+import { DraftOutbox, MAX_PIECE_COORDS, PeerDrafts } from "../src/lib/collab/peer-drafts";
+import { initials } from "../src/components/editor/board/avatars";
 import { DEFAULT_STYLE, ToolRegistry } from "../src/components/editor/tools";
 import {
   addColumn,
@@ -680,6 +682,52 @@ eq("board effects off: no animations", kfx.busy, false);
   eq("copied elements come back from their text", clip.read("canvas-elements:v1:" + JSON.stringify([inside]))?.[0]?.id, "i");
   const copies = cloneElements([inside], 10);
   eq("pasted copies get new ids, moved", [copies[0].id !== "i", copies[0].type === "rect" && copies[0].x], [true, 20]);
+}
+
+// ------------------------------------------------------------ strokes shared as they're drawn
+{
+  const out = new DraftOutbox();
+  const inbox = new PeerDrafts();
+  eq("nothing to send when not drawing", out.take(), undefined);
+  const live: CanvasElement = { id: "s1", type: "stroke", color: "#000", size: 4, points: [0, 0, 1, 1], pressures: [0.5, 0.6] };
+  out.set(live);
+  const p1 = out.take()!;
+  eq("the first piece starts at 0", [p1.from, p1.el.type === "stroke" && p1.el.points], [0, [0, 0, 1, 1]]);
+  eq("then nothing until it grows", out.take(), undefined);
+  if (live.type === "stroke") {
+    live.points.push(2, 2, 3, 3);
+    live.pressures!.push(0.7, 0.8);
+  }
+  const p2 = out.take()!;
+  eq("then only the new points", [p2.from, p2.el.type === "stroke" && p2.el.points, p2.el.type === "stroke" && p2.el.pressures], [4, [2, 2, 3, 3], [0.7, 0.8]]);
+  inbox.apply("tab", p1);
+  const joined = inbox.apply("tab", p2);
+  eq("the other side puts it back together", joined?.type === "stroke" && [joined.points, joined.pressures], [[0, 0, 1, 1, 2, 2, 3, 3], [0.5, 0.6, 0.7, 0.8]]);
+  eq("a piece that doesn't follow on is ignored", inbox.apply("tab", { from: 20, el: { ...live, points: [9, 9] } })?.type === "stroke" && (inbox.apply("tab", undefined) as { points: number[] }).points.length, 8);
+  const big: CanvasElement = { id: "s2", type: "stroke", color: "#000", size: 4, points: Array.from({ length: 1500 }, (_, i) => i) };
+  out.set(big);
+  const first = out.take()!;
+  eq("long strokes go in pieces small enough for the bus", [first.from, first.el.type === "stroke" && first.el.points.length], [0, MAX_PIECE_COORDS]);
+  eq("and the rest is still waiting", out.pending, true);
+  out.set(null);
+  eq("lifting the pointer sends null once", [out.take(), out.take()], [null, undefined]);
+  const shape: CanvasElement = { id: "r", type: "rect", color: "#000", size: 2, fill: null, x: 0, y: 0, w: 10, h: 10 };
+  out.set(shape);
+  eq("shapes go whole", out.take()?.el.type, "rect");
+  eq("and again only when they change", out.take(), undefined);
+  if (shape.type === "rect") shape.w = 20;
+  eq("like this", out.take()?.el.type === "rect", true);
+
+  inbox.apply("tab", null, 1000);
+  eq("a finished draft stays a moment, until it lands", inbox.visible(() => false, 1500).length, 1);
+  eq("and goes once it has", inbox.visible((id) => id === "s1", 1600).length, 0);
+  inbox.apply("other", { from: 0, el: shape }, 0);
+  inbox.apply("other", null, 0);
+  eq("or after a moment if it never does", inbox.visible(() => false, 2000).length, 0);
+  inbox.apply("gone", { from: 0, el: shape }, 0);
+  eq("drafts left behind mid-stroke go after 30 s", inbox.visible(() => false, 31_000).length, 0);
+
+  eq("initials for people without a picture", [initials("Maya Chen"), initials("cher"), initials("  ")], ["MC", "CH", "?"]);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

@@ -3,6 +3,7 @@ import { findCard, kanbanLayout } from "@/lib/canvas/kanban";
 import { drawCard } from "@/lib/canvas/kanban-render";
 import type { CanvasElement } from "@/lib/canvas/schema";
 import type { Peer } from "@/lib/collab/peers";
+import { initials } from "./avatars";
 import type { Interaction } from "./types";
 
 /*
@@ -46,6 +47,8 @@ export type OverlayInput = {
   peers: readonly Peer[];
   /** Where each peer's cursor is drawn this frame (see PeerCursors). */
   cursors: ReadonlyMap<string, Point>;
+  /** A peer's profile picture, if it has loaded. */
+  avatar: (peer: Peer) => HTMLImageElement | null;
 };
 
 export function drawOverlays(ctx: CanvasRenderingContext2D, o: OverlayInput) {
@@ -90,7 +93,7 @@ export function drawOverlays(ctx: CanvasRenderingContext2D, o: OverlayInput) {
     ctx.strokeStyle = "rgba(32,31,36,0.65)";
     ctx.stroke();
   }
-  if (o.peers.length) drawPeers(ctx, o.peers, o.elements, o.cursors, px);
+  if (o.peers.length) drawPeers(ctx, o.peers, o.elements, o.cursors, o.avatar, px);
   ctx.restore();
 }
 
@@ -131,6 +134,7 @@ function drawPeers(
   peers: readonly Peer[],
   elements: readonly CanvasElement[],
   cursors: ReadonlyMap<string, Point>,
+  avatar: (peer: Peer) => HTMLImageElement | null,
   px: number,
 ) {
   const byId = new Map(elements.map((e) => [e.id, e]));
@@ -146,7 +150,7 @@ function drawPeers(
   ctx.setLineDash([]);
   for (const peer of peers) {
     const at = cursors.get(peer.clientId);
-    if (at) drawPeerCursor(ctx, at, peer.name, peer.color, px);
+    if (at) drawPeerCursor(ctx, at, peer, avatar(peer), px);
   }
 }
 
@@ -184,8 +188,18 @@ export class PeerCursors {
   }
 }
 
-/** Someone else's pointer: an arrow and their name, the same size at any zoom. */
-export function drawPeerCursor(ctx: CanvasRenderingContext2D, at: Point, name: string, color: string, px: number) {
+/**
+ * Someone else's pointer, the same size at any zoom: an arrow in their
+ * colour, their profile picture (or initials) in a ring of it, and their name.
+ */
+export function drawPeerCursor(
+  ctx: CanvasRenderingContext2D,
+  at: Point,
+  peer: Pick<Peer, "name" | "color">,
+  picture: HTMLImageElement | null,
+  px: number,
+) {
+  const { name, color } = peer;
   const arrow = [
     [0, 0],
     [0, 17],
@@ -204,12 +218,41 @@ export function drawPeerCursor(ctx: CanvasRenderingContext2D, at: Point, name: s
   ctx.strokeStyle = "#ffffff";
   ctx.stroke();
 
+  // The picture: a circle below and right of the arrow's tip, ringed in their colour.
+  const r = 12 * px;
+  const cx = at.x + 12 * px + r;
+  const cy = at.y + 19 * px + r;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r + 2 * px, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.clip();
+  if (picture) {
+    // Cover the circle, cropping the longer side.
+    const s = Math.min(picture.naturalWidth, picture.naturalHeight);
+    const sx = (picture.naturalWidth - s) / 2;
+    const sy = (picture.naturalHeight - s) / 2;
+    ctx.drawImage(picture, sx, sy, s, s, cx - r, cy - r, r * 2, r * 2);
+  } else {
+    ctx.fillStyle = color;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `700 ${10 * px}px "Public Sans Variable", ui-sans-serif, system-ui, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(initials(name), cx, cy + 0.5 * px);
+  }
+  ctx.restore();
+
   const label = name.length > 24 ? `${name.slice(0, 23)}…` : name;
   ctx.font = `700 ${12 * px}px "Public Sans Variable", ui-sans-serif, system-ui, sans-serif`;
   const w = ctx.measureText(label).width + 12 * px;
   const h = 20 * px;
-  const x = at.x + 12 * px;
-  const y = at.y + 19 * px;
+  const x = cx + r + 6 * px;
+  const y = cy - h / 2;
   ctx.beginPath();
   ctx.roundRect(x, y, w, h, 6 * px);
   ctx.fillStyle = color;

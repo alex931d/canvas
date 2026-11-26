@@ -7,7 +7,7 @@ import puppeteer from "puppeteer-core";
 import nextEnv from "@next/env";
 
 nextEnv.loadEnvConfig(process.cwd());
-const { signUp, sql, grantMembership, sleep, BASE } = await import("./helpers.mjs");
+const { signUp, sql, grantMembership, sleep, BASE, pickTool } = await import("./helpers.mjs");
 const CHROME = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 
 let failures = 0;
@@ -51,7 +51,7 @@ async function drag(p, pts) {
   for (const [x, y] of pts.slice(1)) await p.mouse.move(r.x + x, r.y + y, { steps: 6 });
   await p.mouse.up();
 }
-const tool = (p, label) => p.click(`aside button[aria-label='${label}']`);
+const tool = (p, label) => pickTool(p, label);
 const elements = (id) => JSON.parse(sql(`select data->'elements' from drawings where id='${id}'`) || "[]");
 const openShare = async (p, waitFor) => {
   await p.click("button[aria-label=Share]");
@@ -227,7 +227,10 @@ await a.click("[aria-label^='Alex Kim:']");
 await menuItem(a, "Can view");
 await closeDialog(a);
 check("making someone view-only takes effect live", await waitFor(async () => /View only/.test(await b.$eval("main header", (h) => h.innerText)), 5000));
-check("their drawing tools go away", !(await b.$("aside button[aria-label='Pen']")) && !!(await b.$("aside button[aria-label='Pan']")));
+check(
+  "their drawing tools go away",
+  !(await b.$("[data-testid=tool-dock] [data-items*='Pen']")) && !!(await b.$("[data-testid=tool-dock] button[data-tool='Pan']")),
+);
 const viewerPost = await b.evaluate(async (id) => {
   const res = await fetch(`/api/drawings/${id}/changes`, {
     method: "POST",
