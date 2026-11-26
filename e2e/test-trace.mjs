@@ -12,7 +12,7 @@ import { join } from "node:path";
 import nextEnv from "@next/env";
 
 nextEnv.loadEnvConfig(process.cwd());
-const { sleep, sql, signUp, pickTool } = await import("./helpers.mjs");
+const { sleep, sql, signUp, pickTool, chooseFile } = await import("./helpers.mjs");
 
 const CHROME = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 let failures = 0;
@@ -130,7 +130,7 @@ await page.keyboard.press("p");
 await page.click("[role=group][aria-label=Colour] button[aria-label=Blue]");
 
 check("the dock has Trace a picture", (await page.$("[data-testid=tool-dock] [data-items*='Trace a picture']")) !== null);
-const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 5000 }), page.keyboard.press("u")]);
+const chooser = await chooseFile(page, () => page.keyboard.press("u"));
 check("U opens the picture chooser, for pictures only", !chooser.isMultiple() && (await page.$eval("[data-testid=trace-input]", (i) => i.accept)) === "image/*");
 await chooser.accept([mathFile]);
 await page.waitForSelector("[data-testid=trace-box]", { timeout: 10_000 });
@@ -231,7 +231,7 @@ await page.keyboard.up("Control");
 await waitFor(async () => (await items()) === after);
 
 // ---------------------------------------------------------------- blackboard chemistry
-const [chooser2] = await Promise.all([page.waitForFileChooser(), pickTool(page, "Trace a picture")]);
+const chooser2 = await chooseFile(page, () => pickTool(page, "Trace a picture"));
 await chooser2.accept([chemFile]);
 await page.waitForSelector("[data-testid=trace-box]");
 await settled();
@@ -252,7 +252,7 @@ await settled();
 check("Detail changes what's found", (await strokeCount()) <= chemStrokes);
 
 // Choose another picture, from inside the dialog.
-const [chooser3] = await Promise.all([page.waitForFileChooser(), page.click(button("Choose another picture"))]);
+const chooser3 = await chooseFile(page, () => page.click(button("Choose another picture")));
 await chooser3.accept([textFile]);
 check(
   "a file that isn't a picture says so and closes",
@@ -261,7 +261,7 @@ check(
 check("…without adding anything", !(await dialogOpen()) && (await items()) === after);
 
 // Cancel adds nothing.
-const [chooser4] = await Promise.all([page.waitForFileChooser(), page.keyboard.press("u")]);
+const chooser4 = await chooseFile(page, () => page.keyboard.press("u"));
 await chooser4.accept([mathFile]);
 await page.waitForSelector("[data-testid=trace-box]");
 await page.click(button("Cancel"));
@@ -276,7 +276,7 @@ await signUp(phone, { name: "Trace Phone" });
 await Promise.all([phone.waitForNavigation({ waitUntil: "load" }), phone.click("main form button[type=submit]")]);
 await phone.waitForFunction(() => /^\/drawings\//.test(location.pathname), { timeout: 15_000 });
 await phone.waitForSelector("[data-testid=tool-dock]", { timeout: 10_000 });
-const [chooser5] = await Promise.all([phone.waitForFileChooser(), pickTool(phone, "Trace a picture")]);
+const chooser5 = await chooseFile(phone, () => pickTool(phone, "Trace a picture"));
 await chooser5.accept([mathFile]);
 await phone.waitForSelector("[data-testid=trace-box]");
 await waitFor(async () => /^\d+ strokes?/.test(await phone.$eval("[role=dialog] [role=status]", (n) => n.textContent)));
