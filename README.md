@@ -950,7 +950,17 @@ src/
                                  decorations, the mode and the "hide" preference
     landing/                     the landing page's animated opening scene and editor screenshot
     billing/membership-buttons   Start membership, Manage billing, Log out
-    editor/board.tsx             the infinite canvas: camera, rendering loop, pointer/touch, tools
+    editor/board/                the infinite canvas, in parts:
+      board.tsx                  the component: pointer and touch, keys, text and editors, the floating UI
+      camera.ts                  Camera (where the view is; immutable) and CameraMemory (per drawing, per device)
+      drafts.ts                  DraftSession: a stroke or shape while it's drawn, and what it becomes
+      painter.ts                 BoardPainter: paints at most once a frame; holds the scene while you draw
+      overlays.ts                selection, lasso, marquee, eraser ring, peers' cursors (PeerCursors) and selections
+      frames.ts, kanban-drag.ts  frames' titles and contents; where a dragged to-do card lands
+      capture.ts, media.ts       pictures for Check math and flashcards; MediaImporter for files and traced strokes
+      clipboard.ts               BoardClipboard: one per tab, so copies paste into other drawings
+      shortcuts.ts               Shortcuts: which key does what (a pure mapping to commands)
+      placement.ts               where floating editors and the selection bar go on screen
     editor/canvas-editor.tsx     editor shell: local-first saving, live sync, presence, header, export
     editor/style-bar.tsx         per-tool options (brush, colour, width, sketchy, font)
     editor/math-card.tsx         AI result card (KaTeX)

@@ -6,6 +6,7 @@ import { Button, Switch } from "@/components/kit";
 import { fitYRange } from "@/lib/canvas/graph-render";
 import type { GraphElement } from "@/lib/canvas/schema";
 import { compiledOrError, ExprError } from "@/lib/math/expr";
+import { GRAPH_COLORS } from "./tools";
 
 /**
  * Popover for a graph: up to six functions of x, the visible ranges and the
@@ -13,7 +14,6 @@ import { compiledOrError, ExprError } from "@/lib/math/expr";
  * saves it as one change, Escape puts it back as it was.
  */
 
-export const GRAPH_COLORS = ["#277c78", "#c94736", "#3f82b2", "#826cb0", "#be6c49", "#cab361"];
 
 type Draft = {
   fns: { expr: string; color: string }[];
