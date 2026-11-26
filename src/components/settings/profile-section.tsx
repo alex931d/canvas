@@ -5,6 +5,7 @@ import { useActionState, useRef, useState, useTransition } from "react";
 import { deleteAvatar, saveName, uploadAvatar, type NameState } from "@/app/settings/actions";
 import { Avatar, Button, Input, Label, toast } from "@/components/kit";
 import { AVATAR_SIZE } from "@/lib/profile/avatar";
+import { BrowserProfile, useBrowserAvatar } from "@/lib/profile/browser-profile";
 
 /**
  * Crop the middle square of a photo and encode it at AVATAR_SIZE (WebP, or
@@ -44,10 +45,15 @@ async function squarePicture(file: File): Promise<Blob> {
 
 export function ProfileSection({
   user,
+  member,
 }: {
   user: { id: string; name: string; email: string; avatarUrl: string | null };
+  /** Without a membership a new picture is kept in this browser, not on the server. */
+  member: boolean;
 }) {
   const [avatar, setAvatar] = useState(user.avatarUrl);
+  const browserAvatar = useBrowserAvatar(member ? null : user.id);
+  const shown = browserAvatar ?? avatar;
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, startBusy] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -61,6 +67,11 @@ export function ProfileSection({
         blob = await squarePicture(file);
       } catch {
         toast.error("That file isn't a picture this browser can open. Try a JPEG or PNG.");
+        return;
+      }
+      if (!member) {
+        if (await BrowserProfile.saveAvatar(user.id, blob)) toast.success("Profile picture saved in this browser.");
+        else toast.error("This browser wouldn't keep the picture. Its storage may be off or full.");
         return;
       }
       const local = URL.createObjectURL(blob);
@@ -81,6 +92,11 @@ export function ProfileSection({
 
   const remove = () =>
     startBusy(async () => {
+      if (browserAvatar) {
+        BrowserProfile.removeAvatar(user.id);
+        toast.success("Profile picture removed.");
+        return;
+      }
       const result = await deleteAvatar();
       if (!result.ok) {
         toast.error(result.error);
@@ -95,7 +111,7 @@ export function ProfileSection({
       <div className="flex flex-wrap items-center gap-5 @2xl:flex-col @2xl:flex-nowrap @2xl:items-start">
         <Avatar
           name={nameState.ok && nameState.value ? nameState.value : user.name}
-          src={preview ?? avatar}
+          src={preview ?? shown}
           className="size-24 text-3xl ring-4 ring-white @2xl:size-32 @2xl:text-4xl"
         />
         <div className="grid gap-2">
@@ -114,9 +130,9 @@ export function ProfileSection({
           />
           <Button variant="secondary" loading={busy} onClick={() => fileRef.current?.click()}>
             {busy ? null : <Camera />}
-            {avatar ? "Change picture" : "Add a picture"}
+            {shown ? "Change picture" : "Add a picture"}
           </Button>
-          {avatar ? (
+          {shown ? (
             <Button variant="ghost" disabled={busy} onClick={remove} className="text-red hover:text-red">
               <Trash2 /> Remove picture
             </Button>
@@ -155,8 +171,9 @@ export function ProfileSection({
           <span className="truncate">{user.email}</span>
         </div>
         <p className="text-sm leading-relaxed text-grey-500">
-          Your picture is cropped to the middle square of the photo. People you share a drawing with see it, and so does
-          canvas staff.
+          {member
+            ? "Your picture is cropped to the middle square of the photo. People you share a drawing with see it, and so does canvas staff."
+            : "Your picture is cropped to the middle square of the photo and kept in this browser. It moves to your account when you get the membership."}
         </p>
       </div>
     </div>

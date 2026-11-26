@@ -189,7 +189,13 @@ export default function TermsPage() {
                       Membership
                     </Link>{" "}
                     page. Cancelling stops the next renewal; you keep the membership until the end of the month you&apos;ve
-                    paid for. After that, the drawings in your account are kept for when you come back.
+                    paid for.
+                  </li>
+                  <li>
+                    When a membership ends, what&apos;s in your account on our servers (drawings and their images and
+                    videos, flashcards, and your profile picture and settings) is kept for 30 days, then deleted
+                    unless you renew. We email you when it ends and a week before. Until then you can move your
+                    drawings into your browser from the home page to keep them on the free plan.
                   </li>
                   <li>We don&apos;t refund partial months, except where the law requires us to.</li>
                   <li>If a payment fails, we may pause your membership until it goes through.</li>

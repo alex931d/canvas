@@ -107,6 +107,26 @@ export const userPreferences = pgTable("user_preferences", {
     .$onUpdate(() => new Date()),
 }).enableRLS();
 
+/**
+ * Server space held by someone whose membership has ended: their drawings
+ * (with their files), flashcards, profile picture and settings. Found by the
+ * hourly sweep (src/lib/billing/lapsed.ts), which emails them straight away
+ * and a week before `deleteAfter`, then deletes it all unless they renew
+ * (renewing removes the row). Without a membership, nothing new is stored.
+ */
+export const storageDeletions = pgTable("storage_deletions", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** When the sweep first found them without a membership but with data here. */
+  endedAt: timestamp("ended_at", { withTimezone: true }).notNull().defaultNow(),
+  deleteAfter: timestamp("delete_after", { withTimezone: true }).notNull(),
+  /** The "your membership ended" email. */
+  warnedAt: timestamp("warned_at", { withTimezone: true }),
+  /** The "a week to go" email. */
+  remindedAt: timestamp("reminded_at", { withTimezone: true }),
+}).enableRLS();
+
 export const sessions = pgTable(
   "sessions",
   {

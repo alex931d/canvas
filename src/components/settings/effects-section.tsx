@@ -2,10 +2,11 @@
 
 import { Check, Play } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { updatePreferences } from "@/app/settings/actions";
 import { Button, Switch, toast } from "@/components/kit";
 import { DRAW_EFFECTS, DRAW_EFFECT_INFO, type DrawEffect, type Preferences } from "@/lib/preferences";
+import { BrowserProfile, useBrowserPreferences } from "@/lib/profile/browser-profile";
 import { BoardPreview, EffectPreview } from "./effect-previews";
 
 /** The canvas's dotted paper, behind each example. */
@@ -19,8 +20,20 @@ type PreviewKey = DrawEffect | "board";
 /** Only ever called from event handlers. */
 const clock = () => performance.now();
 
-/** Drawing effect and to-do board choices, saved as soon as they change. */
-export function EffectsSection({ initial }: { initial: Preferences }) {
+const noSubscribe = () => () => {};
+
+/**
+ * Without a membership the choices are kept in this browser: read once the
+ * page is running here (the server can't see them), falling back to `initial`.
+ */
+export function BrowserEffectsSection({ initial }: { initial: Preferences }) {
+  const local = useBrowserPreferences();
+  const running = useSyncExternalStore(noSubscribe, () => true, () => false);
+  return <EffectsSection key={running ? "here" : "server"} initial={(running ? local : null) ?? initial} inBrowser />;
+}
+
+/** Drawing effect and to-do board choices, saved as soon as they change (in this browser with `inBrowser`). */
+export function EffectsSection({ initial, inBrowser = false }: { initial: Preferences; inBrowser?: boolean }) {
   const [prefs, setPrefs] = useState(initial);
   const [status, setStatus] = useState<"" | "saving" | "saved">("");
   const [, start] = useTransition();
@@ -39,6 +52,15 @@ export function EffectsSection({ initial }: { initial: Preferences }) {
   const save = (next: Preferences) => {
     const before = prefs;
     setPrefs(next);
+    if (inBrowser) {
+      if (BrowserProfile.savePreferences(next)) setStatus("saved");
+      else {
+        setPrefs(before);
+        setStatus("");
+        toast.error("This browser wouldn't keep the change. Its storage may be off or full.");
+      }
+      return;
+    }
     setStatus("saving");
     start(async () => {
       const result = await updatePreferences(next);
@@ -56,8 +78,10 @@ export function EffectsSection({ initial }: { initial: Preferences }) {
     <div className="grid gap-10">
       {reduce ? (
         <p className="rounded-lg bg-beige-100 px-4 py-3 text-sm leading-relaxed">
-          This device is set to reduce motion, so canvas keeps these effects off here. What you pick still applies on
-          your other devices.
+          This device is set to reduce motion, so canvas keeps these effects off here.{" "}
+          {inBrowser
+            ? "What you pick is kept in this browser for when motion is allowed."
+            : "What you pick still applies on your other devices."}
         </p>
       ) : null}
 
@@ -75,7 +99,7 @@ export function EffectsSection({ initial }: { initial: Preferences }) {
             When things appear on a canvas
           </h3>
           <span role="status" data-testid="prefs-status" className="text-sm text-grey-500">
-            {status === "saving" ? "Saving…" : status === "saved" ? "Saved" : ""}
+            {status === "saving" ? "Saving…" : status === "saved" ? (inBrowser ? "Saved in this browser" : "Saved") : ""}
           </span>
         </div>
         <p className="-mt-2 max-w-[44rem] text-sm leading-relaxed text-grey-500">

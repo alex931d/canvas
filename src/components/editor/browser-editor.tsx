@@ -8,6 +8,7 @@ import type { MenuUser } from "@/components/user-menu";
 import type { Plan } from "@/lib/billing/plan";
 import { BrowserLibrary, type BrowserDrawing } from "@/lib/local-store/library";
 import type { Preferences } from "@/lib/preferences";
+import { useBrowserPreferences } from "@/lib/profile/browser-profile";
 import { CanvasEditor } from "./canvas-editor";
 
 type Loaded = { status: "loading" } | { status: "missing" } | { status: "ready"; drawing: BrowserDrawing };
@@ -28,6 +29,9 @@ export function BrowserEditor({
   preferences?: Preferences;
 }) {
   const [loaded, setLoaded] = useState<Loaded>({ status: "loading" });
+  // Without a membership, effect choices are kept in this browser (Settings).
+  const localPreferences = useBrowserPreferences();
+  const effects = plan === "member" ? preferences : (localPreferences ?? preferences);
   useEffect(() => {
     let cancelled = false;
     BrowserLibrary.shared
@@ -49,7 +53,7 @@ export function BrowserEditor({
       storage="browser"
       plan={plan}
       user={user}
-      preferences={preferences}
+      preferences={effects}
       role="owner"
       ownerName={null}
       initialTitle={drawing.title}

@@ -1,17 +1,20 @@
 import { Eye, Lock, Users, UsersRound } from "lucide-react";
 import Link from "next/link";
-import { LocalTime } from "@/components/local-time";
+import { LocalDate, LocalTime } from "@/components/local-time";
 import { Button, Skeleton } from "@/components/kit";
 import { requireUser } from "@/lib/auth/session";
 import { getMembership } from "@/lib/billing/membership";
 import { MEMBERSHIP } from "@/lib/billing/plan";
-import { countOwnDrawings, listDrawings, listSharedWithMe } from "@/lib/drawings";
+import { deletionDate, heldBy } from "@/lib/billing/lapsed";
+import { listDrawings, listKeptDrawings, listSharedWithMe } from "@/lib/drawings";
 import { studySummary } from "@/lib/study/cards";
 import { cn } from "@/lib/utils";
 import { listWorkspaces } from "@/lib/workspaces/data";
 import { canEditInWorkspace } from "@/lib/workspaces/roles";
+import { MoveBrowserProfile } from "@/components/settings/move-browser-profile";
 import { BrowserGallery, PendingBrowserDrawings } from "./browser-gallery";
 import { DrawingCard } from "./drawing-card";
+import { KeptDrawings } from "./kept-drawings";
 import { DrawingMenu } from "./drawing-menu";
 import { NewDrawingButton } from "./new-drawing-button";
 
@@ -36,6 +39,7 @@ export async function Overview() {
   return (
     <>
       <PendingBrowserDrawings />
+      <MoveBrowserProfile userId={user.id} />
       {/* Phones: three small tiles in a row, so the drawings start near the top. */}
       <section aria-label="Summary" className="mb-6 grid grid-cols-3 gap-2 sm:mb-8 sm:gap-3 md:gap-6">
         <div className={cn(STAT, "bg-grey-900 text-white")}>
@@ -196,11 +200,23 @@ export async function Overview() {
 
 /**
  * Signed in without a membership: the drawings in this browser, and what the
- * membership adds. After a membership ends, the drawings in the account are
- * kept; this says how many, and renewing opens them again.
+ * membership adds. After a membership ends, what's still in the account
+ * (drawings, flashcards, a picture) is deleted on a date unless they renew
+ * (src/lib/billing/lapsed.ts): this says when, and lists the drawings so
+ * they can move them into this browser first.
  */
 async function FreeOverview({ ended }: { ended: boolean }) {
-  const kept = ended ? await countOwnDrawings() : 0;
+  const user = await requireUser();
+  const held = await heldBy(user.id);
+  const deleteOn = held.drawings || held.flashcards || held.picture ? await deletionDate(user.id) : null;
+  const kept = held.drawings ? await listKeptDrawings() : [];
+  const what = [
+    held.drawings ? (held.drawings === 1 ? "drawing" : `${held.drawings} drawings`) : null,
+    held.flashcards ? (held.flashcards === 1 ? "flashcard" : `${held.flashcards} flashcards`) : null,
+    !held.drawings && !held.flashcards && held.picture ? "profile picture" : null,
+  ]
+    .filter(Boolean)
+    .join(" and ");
   return (
     <>
       <section
@@ -209,21 +225,32 @@ async function FreeOverview({ ended }: { ended: boolean }) {
         className="mb-6 flex flex-wrap items-center gap-x-8 gap-y-4 rounded-xl bg-grey-900 px-6 py-5 text-white sm:mb-8"
       >
         <div className="min-w-0 flex-1">
-          <p className="font-bold">
-            {ended ? "Your membership has ended" : "You're on the free plan"}
-          </p>
-          <p className="mt-1 max-w-[40rem] text-sm leading-relaxed text-grey-300">
-            {ended && kept > 0
-              ? `The ${kept === 1 ? "drawing" : `${kept} drawings`} in your account ${kept === 1 ? "is" : "are"} kept safe. Renew to open ${kept === 1 ? "it" : "them"} again; until then, drawings you start are saved in this browser.`
-              : "New drawings are saved in this browser. The membership keeps them in your account and adds math checks, chemistry tools, flashcards, drawing together and team workspaces."}
+          <p className="font-bold">{ended || deleteOn ? "Your membership has ended" : "You're on the free plan"}</p>
+          <p className="mt-1 max-w-[44rem] text-sm leading-relaxed text-grey-300">
+            {deleteOn ? (
+              <>
+                The {what} in your account will be deleted on{" "}
+                <strong className="text-white" data-testid="delete-on">
+                  <LocalDate iso={deleteOn.toISOString()} />
+                </strong>{" "}
+                unless you renew. {held.drawings ? "Move drawings into this browser to keep them on the free plan. " : null}
+                New drawings are saved in this browser.
+              </>
+            ) : (
+              "New drawings are saved in this browser. The membership keeps them in your account and adds math checks, chemistry tools, flashcards, drawing together and team workspaces."
+            )}
           </p>
         </div>
         <Button asChild variant="light" size="lg">
           <Link href="/pricing">
-            {ended ? "Renew membership" : `Get the membership, ${MEMBERSHIP.price} ${MEMBERSHIP.per}`}
+            {ended || deleteOn ? "Renew membership" : `Get the membership, ${MEMBERSHIP.price} ${MEMBERSHIP.per}`}
           </Link>
         </Button>
       </section>
+
+      <KeptDrawings
+        drawings={kept.map((d) => ({ id: d.id, title: d.title, thumbnail: d.thumbnail, updatedAt: d.updatedAt.toISOString() }))}
+      />
 
       <BrowserGallery member={false} />
 

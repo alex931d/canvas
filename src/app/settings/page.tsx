@@ -7,7 +7,7 @@ import { AppSidebar, SidebarLink } from "@/components/app-sidebar";
 import { Skeleton } from "@/components/kit";
 import { Reveal } from "@/components/motion/reveal";
 import { BuddiesSection } from "@/components/settings/buddies-section";
-import { EffectsSection } from "@/components/settings/effects-section";
+import { BrowserEffectsSection, EffectsSection } from "@/components/settings/effects-section";
 import { ProfileSection } from "@/components/settings/profile-section";
 import { SigningInSection } from "@/components/settings/signing-in-section";
 import { HeaderUserSlot } from "@/components/header-user-slot";
@@ -71,7 +71,7 @@ export default function SettingsPage({ searchParams }: PageProps<"/settings">) {
 
 async function SettingsContent({ searchParams }: { searchParams: PageProps<"/settings">["searchParams"] }) {
   const user = await requireUser();
-  const [preferences, { isMember }, twoFactor, google, password, { google: googleResult }] = await Promise.all([
+  const [preferences, membership, twoFactor, google, password, { google: googleResult }] = await Promise.all([
     getPreferences(user.id),
     getMembership(user.id),
     twoFactorStatus(user.id),
@@ -79,6 +79,7 @@ async function SettingsContent({ searchParams }: { searchParams: PageProps<"/set
     hasPassword(user.id),
     searchParams,
   ]);
+  const { isMember } = membership;
   const [buddies, rules, setup] = await Promise.all([
     isMember ? getSettings(user.id) : null,
     isMember ? getWildRules() : null,
@@ -90,7 +91,10 @@ async function SettingsContent({ searchParams }: { searchParams: PageProps<"/set
         <h2 id="profile-title" className="mb-6 text-xl font-bold">
           Profile
         </h2>
-        <ProfileSection user={{ id: user.id, name: user.name, email: user.email, avatarUrl: user.avatarUrl }} />
+        <ProfileSection
+          user={{ id: user.id, name: user.name, email: user.email, avatarUrl: user.avatarUrl }}
+          member={membership.isMember}
+        />
       </Reveal>
       <Reveal
         as="section"
@@ -122,7 +126,8 @@ async function SettingsContent({ searchParams }: { searchParams: PageProps<"/set
         <h2 id="effects-title" className="mb-6 text-xl font-bold">
           Effects
         </h2>
-        <EffectsSection initial={preferences} />
+        {/* Without a membership, effect choices are kept in this browser. */}
+        {membership.isMember ? <EffectsSection initial={preferences} /> : <BrowserEffectsSection initial={preferences} />}
       </Reveal>
       <Reveal as="section" aria-labelledby="buddies-title" className="@container rounded-xl bg-card p-5 md:p-8">
         <h2 id="buddies-title" className="mb-6 text-xl font-bold">

@@ -3,6 +3,7 @@
 import { refresh } from "next/cache";
 import { limiters } from "@/lib/auth/rate-limit";
 import { getCurrentSession } from "@/lib/auth/session";
+import { getMembership } from "@/lib/billing/membership";
 import { preferencesSchema, type Preferences } from "@/lib/preferences";
 import { avatarUrl } from "@/lib/profile/avatar";
 import { nameProblem, removeAvatar, savePreferences, setAvatar, setName } from "@/lib/profile/server";
@@ -11,6 +12,11 @@ import { nameProblem, removeAvatar, savePreferences, setAvatar, setName } from "
  * The settings page: your name, profile picture and effect choices. Each
  * action checks the session again and refreshes the page, so the account
  * menu shows the new name and picture straight away.
+ *
+ * Without a membership nothing new is stored here: the picture and the
+ * effect choices are kept in the browser (src/lib/profile/browser-profile.ts)
+ * and only reach the server once someone becomes a member. The name is part
+ * of the account itself, and removing a picture only frees space.
  */
 
 export type NameState = { ok?: string; error?: string; value?: string };
@@ -19,6 +25,7 @@ export type SaveResult = { ok: true } | { ok: false; error: string };
 
 const SIGNED_OUT = "Your session ended. Log in again to change your settings.";
 const TOO_FAST = "That's a lot of changes at once. Wait a few seconds and try again.";
+const IN_THE_BROWSER = "Without a membership, your picture and effect choices are kept in your browser.";
 
 async function signedIn() {
   const { user } = await getCurrentSession();
@@ -42,6 +49,7 @@ export async function saveName(_prev: NameState, formData: FormData): Promise<Na
 export async function uploadAvatar(formData: FormData): Promise<ProfileResult> {
   const user = await signedIn();
   if (!user) return { ok: false, error: SIGNED_OUT };
+  if (!(await getMembership(user.id)).isMember) return { ok: false, error: IN_THE_BROWSER };
   const file = formData.get("avatar");
   if (!(file instanceof Blob)) return { ok: false, error: "Choose a picture to upload." };
   if (!(await limiters.profileByUser.consume(user.id)).ok) return { ok: false, error: TOO_FAST };
@@ -62,6 +70,7 @@ export async function deleteAvatar(): Promise<ProfileResult> {
 export async function updatePreferences(next: Preferences): Promise<SaveResult> {
   const user = await signedIn();
   if (!user) return { ok: false, error: SIGNED_OUT };
+  if (!(await getMembership(user.id)).isMember) return { ok: false, error: IN_THE_BROWSER };
   const parsed = preferencesSchema.safeParse(next);
   if (!parsed.success) return { ok: false, error: "That setting isn't one canvas knows." };
   if (!(await limiters.preferencesByUser.consume(user.id)).ok) return { ok: false, error: TOO_FAST };

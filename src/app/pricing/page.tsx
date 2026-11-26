@@ -116,7 +116,7 @@ async function PlanActions({ searchParams }: { searchParams: PageProps<"/pricing
               ) : (
                 "Your membership isn't active right now."
               )}{" "}
-              The drawings in your account are waiting for you.
+              Renew within 30 days of it ending to keep what&apos;s in your account.
             </Notice>
           ) : null}
           <StartMembershipButton label={ended ? "Renew membership" : "Start membership"} variant="light" />
@@ -233,7 +233,7 @@ const QUESTIONS = [
   },
   {
     q: "Can I cancel?",
-    a: "Yes, any time, from Manage billing on your membership page. You keep the membership until the end of the month you've paid for. After that the drawings in your account are kept for when you come back, and new drawings save in your browser again.",
+    a: "Yes, any time, from Manage billing on your membership page. You keep the membership until the end of the month you've paid for. After that, what's in your account is kept for 30 days and then deleted unless you renew; we email you when it ends and a week before. Move your drawings into your browser from the home page to keep them on the free plan.",
   },
   {
     q: "What if a payment doesn't go through?",

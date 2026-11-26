@@ -4,12 +4,14 @@ import { z } from "zod";
 import { db } from "@/db";
 import { assets, drawingMembers, drawings, workspaceMembers } from "@/db/schema";
 import { getCurrentSession } from "@/lib/auth/session";
-import { membershipRequiredResponse } from "@/lib/billing/membership";
+import { getMembership } from "@/lib/billing/membership";
 import { parseRange } from "@/lib/http/range";
 
 /**
  * Serve an uploaded image, GIF or video to the drawing's owner and the people
- * it's shared with. Asset ids never change content, so the browser may cache
+ * it's shared with. Without a membership, only owners get their own files
+ * (to move their drawings into the browser before they're deleted; see
+ * src/lib/billing/lapsed.ts). Asset ids never change content, so the browser may cache
  * it forever, but only privately (never a shared CDN).
  *
  * Range requests (what video players send) get one piece at a time, read
@@ -21,11 +23,13 @@ import { parseRange } from "@/lib/http/range";
 const memberOf = (userId: string) => and(eq(drawingMembers.drawingId, drawings.id), eq(drawingMembers.userId, userId));
 const inWorkspaceOf = (userId: string) =>
   and(eq(workspaceMembers.workspaceId, drawings.workspaceId), eq(workspaceMembers.userId, userId));
-const visible = (id: string, userId: string) =>
-  and(
-    eq(assets.id, id),
-    or(eq(drawings.userId, userId), isNotNull(drawingMembers.userId), isNotNull(workspaceMembers.userId)),
-  );
+const visible = (id: string, userId: string, ownOnly: boolean) =>
+  ownOnly
+    ? and(eq(assets.id, id), eq(drawings.userId, userId))
+    : and(
+        eq(assets.id, id),
+        or(eq(drawings.userId, userId), isNotNull(drawingMembers.userId), isNotNull(workspaceMembers.userId)),
+      );
 
 const HEADERS = {
   "Accept-Ranges": "bytes",
@@ -37,8 +41,7 @@ export async function GET(request: Request, ctx: RouteContext<"/api/assets/[id]"
   await connection();
   const { user } = await getCurrentSession();
   if (!user) return new Response("Sign in to view files", { status: 401 });
-  const notMember = await membershipRequiredResponse(user.id, "Images");
-  if (notMember) return notMember;
+  const ownOnly = !(await getMembership(user.id)).isMember;
 
   const { id } = await ctx.params;
   if (!z.uuid().safeParse(id).success) return new Response("Not found", { status: 404 });
@@ -51,7 +54,7 @@ export async function GET(request: Request, ctx: RouteContext<"/api/assets/[id]"
       .innerJoin(drawings, eq(drawings.id, assets.drawingId))
       .leftJoin(drawingMembers, memberOf(user.id))
       .leftJoin(workspaceMembers, inWorkspaceOf(user.id))
-      .where(visible(id, user.id))
+      .where(visible(id, user.id, ownOnly))
       .limit(1);
     if (!meta) return new Response("Not found", { status: 404 });
     const range = parseRange(rangeHeader, meta.byteSize);
@@ -66,7 +69,7 @@ export async function GET(request: Request, ctx: RouteContext<"/api/assets/[id]"
         .innerJoin(drawings, eq(drawings.id, assets.drawingId))
         .leftJoin(drawingMembers, memberOf(user.id))
         .leftJoin(workspaceMembers, inWorkspaceOf(user.id))
-        .where(visible(id, user.id))
+        .where(visible(id, user.id, ownOnly))
         .limit(1);
       if (!row) return new Response("Not found", { status: 404 });
       return new Response(new Uint8Array(row.chunk), {
@@ -87,7 +90,7 @@ export async function GET(request: Request, ctx: RouteContext<"/api/assets/[id]"
     .innerJoin(drawings, eq(drawings.id, assets.drawingId))
     .leftJoin(drawingMembers, memberOf(user.id))
     .leftJoin(workspaceMembers, inWorkspaceOf(user.id))
-    .where(visible(id, user.id))
+    .where(visible(id, user.id, ownOnly))
     .limit(1);
   if (!row) return new Response("Not found", { status: 404 });
   return new Response(new Uint8Array(row.bytes), {

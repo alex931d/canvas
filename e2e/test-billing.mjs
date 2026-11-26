@@ -268,7 +268,7 @@ check(
   await status(),
 );
 await page.goto(BASE, { waitUntil: "networkidle0" });
-check("home says the membership ended, and offers to renew", await onFreePlan(page, /membership has ended[\s\S]*drawing in your account is kept safe/), path());
+check("home says the membership ended, and offers to renew", await onFreePlan(page, /membership has ended[\s\S]*drawing in your account will be deleted on/), path());
 check("their drawings are kept", Number(sql(`select count(*) from drawings where user_id = '${me.id}'`)) === 1);
 
 // ------------------------------------------------------------ renewing
