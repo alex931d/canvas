@@ -296,6 +296,29 @@ await waitFor(upgradeFeature);
 check("and member features still offer the membership", (await upgradeFeature()) === "math-check");
 await closeDialog();
 
+// ------------------------------------------------------------ without a membership, settings stay in the browser
+const local = (key) => page.evaluate((k) => localStorage.getItem(k), key);
+await page.goto(`${BASE}/settings`, { waitUntil: "networkidle0" });
+await page.waitForSelector("[data-testid=avatar-input]", { timeout: 10_000 });
+await (await page.$("[data-testid=avatar-input]")).uploadFile(pngFile);
+const kept = await waitFor(async () => /^data:image\//.test((await local(`canvas-avatar:${me.id}`)) ?? ""), 10_000);
+check("a non-member's profile picture is kept in the browser", !!kept);
+check("and nothing is stored on the server", sql(`select count(*) from user_avatars where user_id = '${me.id}'`) === "0");
+const menuPicture = () =>
+  page.$eval("button[aria-label^='Account: Fern'] img", (img) => img.getAttribute("src")).catch(() => "");
+check("the account menu shows it", /^data:image\//.test(await menuPicture()));
+check("the page says where it's kept", /kept in this browser/.test(await text()));
+await page.click("label:has(input[name=drawEffect][value=trace])");
+await waitFor(async () => /Saved in this browser/.test(await page.$eval("[data-testid=prefs-status]", (n) => n.textContent)));
+check(
+  "effect choices are saved in the browser",
+  JSON.parse((await local("canvas-preferences")) ?? "{}").drawEffect === "trace",
+);
+check("not on the server", sql(`select count(*) from user_preferences where user_id = '${me.id}'`) === "0");
+await page.reload({ waitUntil: "networkidle0" });
+await waitFor(async () => page.$eval("input[name=drawEffect][value=trace]", (i) => i.checked));
+check("and still chosen after a reload", await page.$eval("input[name=drawEffect][value=trace]", (i) => i.checked));
+
 // ------------------------------------------------------------ paying moves the browser's drawings
 await page.goto(`${BASE}/pricing`, { waitUntil: "networkidle0" });
 await page.waitForSelector("xpath/.//button[normalize-space()='Start membership']", { timeout: 10_000 });
@@ -319,6 +342,16 @@ check(
 );
 check("and the browser's copy is gone", (await library()).drawings.length === 0 && (await library()).assets.length === 0);
 check("the other one moved too", sql(`select user_id from drawings where id = '${theirsId}'`) === me.id);
+await waitFor(async () => sql(`select count(*) from user_avatars where user_id = '${me.id}'`) === "1", 10_000);
+check("so does the profile picture", sql(`select count(*) from user_avatars where user_id = '${me.id}'`) === "1");
+check(
+  "and the effect choices",
+  JSON.parse(sql(`select preferences from user_preferences where user_id = '${me.id}'`) || "{}").drawEffect === "trace",
+);
+check(
+  "leaving the browser's copies behind",
+  !(await local(`canvas-avatar:${me.id}`)) && !(await local("canvas-preferences")),
+);
 
 await page.goto(BASE, { waitUntil: "networkidle0" });
 check("the member's gallery lists it", !!(await page.$(`main a[href='/drawings/${firstId}']`)));

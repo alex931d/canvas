@@ -9,6 +9,7 @@ import { setDecorationsHidden, useSeasonState } from "@/components/seasonal/seas
 import { can, type Role } from "@/lib/auth/roles";
 import { THEME_INFO } from "@/lib/seasons";
 import { clearLocalDataOnSignOut } from "@/lib/local-store/sign-out";
+import { useBrowserAvatar } from "@/lib/profile/browser-profile";
 import { cn } from "@/lib/utils";
 
 export type MenuUser = { id: string; name: string; email: string; role?: Role; avatarUrl?: string | null };
@@ -78,16 +79,22 @@ function AccountMenuContent({
   );
 }
 
+/** The account's picture: one kept in this browser (without a membership), else the server's. */
+function usePicture(user: MenuUser) {
+  return useBrowserAvatar(user.id) ?? user.avatarUrl ?? null;
+}
+
 /** Account button at the bottom of the dark sidebar. */
 export function SidebarUserMenu({ user }: { user: MenuUser }) {
   const { pending, run } = useSignOut(user);
+  const picture = usePicture(user);
   return (
     <Menu>
       <MenuTrigger
         aria-label={`Account: ${user.name}`}
         className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-white outline-none hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-green rail:mx-auto rail:w-auto rail:px-2"
       >
-        <Avatar name={user.name} src={user.avatarUrl} />
+        <Avatar name={user.name} src={picture} />
         <span className="min-w-0 rail:hidden">
           <span className="block truncate text-sm font-bold">{user.name}</span>
           <span className="block truncate text-xs text-grey-300">{user.email}</span>
@@ -101,13 +108,14 @@ export function SidebarUserMenu({ user }: { user: MenuUser }) {
 /** Compact account button for page headers (phones). */
 export function HeaderUserMenu({ user, className }: { user: MenuUser; className?: string }) {
   const { pending, run } = useSignOut(user);
+  const picture = usePicture(user);
   return (
     <Menu>
       <MenuTrigger
         aria-label={`Account: ${user.name}`}
         className={cn("rounded-full outline-none focus-visible:ring-2 focus-visible:ring-green", className)}
       >
-        <Avatar name={user.name} src={user.avatarUrl} className="size-10" />
+        <Avatar name={user.name} src={picture} className="size-10" />
       </MenuTrigger>
       <AccountMenuContent user={user} onSignOut={run} pending={pending} side="bottom" />
     </Menu>

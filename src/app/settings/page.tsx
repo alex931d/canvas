@@ -5,13 +5,14 @@ import { StaffSidebarLink } from "@/components/admin/staff-sidebar-link";
 import { AppSidebar, SidebarLink } from "@/components/app-sidebar";
 import { Skeleton } from "@/components/kit";
 import { Reveal } from "@/components/motion/reveal";
-import { EffectsSection } from "@/components/settings/effects-section";
+import { BrowserEffectsSection, EffectsSection } from "@/components/settings/effects-section";
 import { ProfileSection } from "@/components/settings/profile-section";
 import { SigningInSection } from "@/components/settings/signing-in-section";
 import { HeaderUserSlot } from "@/components/header-user-slot";
 import { HeaderUserMenu, SidebarUserMenu } from "@/components/user-menu";
 import { googleEnabled, googleLinkFor, hasPassword } from "@/lib/auth/google";
 import { requireUser } from "@/lib/auth/session";
+import { getMembership } from "@/lib/billing/membership";
 import { pendingSetup, twoFactorAvailable, twoFactorStatus } from "@/lib/auth/two-factor";
 import { getPreferences } from "@/lib/profile/server";
 
@@ -65,7 +66,8 @@ export default function SettingsPage({ searchParams }: PageProps<"/settings">) {
 
 async function SettingsContent({ searchParams }: { searchParams: PageProps<"/settings">["searchParams"] }) {
   const user = await requireUser();
-  const [preferences, twoFactor, google, password, { google: googleResult }] = await Promise.all([
+  const [membership, preferences, twoFactor, google, password, { google: googleResult }] = await Promise.all([
+    getMembership(user.id),
     getPreferences(user.id),
     twoFactorStatus(user.id),
     googleEnabled() ? googleLinkFor(user.id) : null,
@@ -79,7 +81,10 @@ async function SettingsContent({ searchParams }: { searchParams: PageProps<"/set
         <h2 id="profile-title" className="mb-6 text-xl font-bold">
           Profile
         </h2>
-        <ProfileSection user={{ id: user.id, name: user.name, email: user.email, avatarUrl: user.avatarUrl }} />
+        <ProfileSection
+          user={{ id: user.id, name: user.name, email: user.email, avatarUrl: user.avatarUrl }}
+          member={membership.isMember}
+        />
       </Reveal>
       <Reveal
         as="section"
@@ -111,7 +116,8 @@ async function SettingsContent({ searchParams }: { searchParams: PageProps<"/set
         <h2 id="effects-title" className="mb-6 text-xl font-bold">
           Effects
         </h2>
-        <EffectsSection initial={preferences} />
+        {/* Without a membership, effect choices are kept in this browser. */}
+        {membership.isMember ? <EffectsSection initial={preferences} /> : <BrowserEffectsSection initial={preferences} />}
       </Reveal>
     </div>
   );

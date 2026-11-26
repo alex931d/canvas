@@ -10,6 +10,7 @@ import { studySummary } from "@/lib/study/cards";
 import { cn } from "@/lib/utils";
 import { listWorkspaces } from "@/lib/workspaces/data";
 import { canEditInWorkspace } from "@/lib/workspaces/roles";
+import { MoveBrowserProfile } from "@/components/settings/move-browser-profile";
 import { BrowserGallery, PendingBrowserDrawings } from "./browser-gallery";
 import { DrawingCard } from "./drawing-card";
 import { DrawingMenu } from "./drawing-menu";
@@ -36,6 +37,7 @@ export async function Overview() {
   return (
     <>
       <PendingBrowserDrawings />
+      <MoveBrowserProfile userId={user.id} />
       {/* Phones: three small tiles in a row, so the drawings start near the top. */}
       <section aria-label="Summary" className="mb-6 grid grid-cols-3 gap-2 sm:mb-8 sm:gap-3 md:gap-6">
         <div className={cn(STAT, "bg-grey-900 text-white")}>

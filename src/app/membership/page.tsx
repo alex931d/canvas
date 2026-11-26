@@ -9,6 +9,7 @@ import {
   SignOutButton,
 } from "@/components/billing/membership-buttons";
 import { WelcomeMove } from "@/components/gallery/browser-gallery";
+import { MoveBrowserProfile } from "@/components/settings/move-browser-profile";
 import { LocalDate } from "@/components/local-time";
 import { Badge, Button, Skeleton } from "@/components/kit";
 import type { SessionUser } from "@/lib/auth/session";
@@ -77,6 +78,8 @@ async function MembershipCard({ searchParams }: { searchParams: PageProps<"/memb
   return (
     <>
       {membership.isMember ? <MemberView membership={membership} welcome={checkout === "success"} /> : <Confirming />}
+      {/* A picture or effect choices kept in this browser before joining go into the account. */}
+      {membership.isMember ? <MoveBrowserProfile userId={user.id} /> : null}
       <p className="mt-8 border-t pt-5 text-center text-sm text-grey-500">
         Signed in as <span className="font-bold text-grey-900">{user.email}</span>. <SignOutButton user={user} />
       </p>

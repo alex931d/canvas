@@ -408,9 +408,15 @@ read from the browser, and the server only says who's looking.
   drawing APIs answer 401 without an account and 402 without a membership.
 - If the browser's storage is full, the editor says the latest changes aren't saved and offers a
   backup download; it tries again on the next change.
+- **Nothing new is stored on the server without a membership.** Every route and action that would
+  store something (drawings, pictures and videos, thumbnails, flashcards, sharing, workspaces, math
+  checks, study buddies on dev) needs one. Settings keeps a non-member's profile picture and effect
+  choices in the browser (see [Settings](#settings-profile-pictures-and-effects)). What's left on the
+  server is the account itself: name, email, password and sign-in settings.
 
-**Joining moves the browser's drawings into the account.** Straight after paying, the welcome on
-`/membership` moves every drawing in the browser (`BrowserDrawingMover`,
+**Joining moves the browser's drawings into the account**, and the profile picture and effect choices
+kept in the browser too (`MoveBrowserProfile`, on the welcome and the member's home page). Straight
+after paying, the welcome on `/membership` moves every drawing in the browser (`BrowserDrawingMover`,
 `src/lib/local-store/mover.ts`): the drawing goes to `POST /api/drawings/import` under the id it
 already had, each image, GIF and video it shows follows through the usual upload route, and only
 then is the browser's copy deleted. Anything that fails stays in the browser, with the reason. Moving
@@ -889,6 +895,10 @@ and the server never resizes anything.
   kit's `Avatar`).
 - **Remove picture** deletes it. Staff who can edit an account can also take one down from its panel in
   `/admin` (**Remove profile picture**, written to the history).
+- **Without a membership** the picture stays in the browser instead (`BrowserProfile` in
+  `src/lib/profile/browser-profile.ts`, a small data URL in `localStorage` under
+  `canvas-avatar:<user id>`), and the account menus show it from there. The server's `uploadAvatar`
+  refuses non-members, so nothing is stored for them. It moves into the account when they join.
 
 **Drawing effects** decide how things appear on a canvas when you didn't just draw them: a drawing
 opening, someone else drawing, pasting, undo and redo, and equations, graphs, pictures and to-do
@@ -912,7 +922,9 @@ deleted and undone things leave the same way.
 **To-do board effects** (`src/lib/canvas/kanban-fx.ts`): see [To-do boards](#to-do-boards-gifs-and-videos).
 
 Both choices are saved per person in `user_preferences` as soon as they change, and follow you to
-every device. On a device set to **reduce motion**, canvas leaves them off (the settings page says so),
+every device. Without a membership they're saved in the browser instead (`canvas-preferences` in
+`localStorage`; the server's `updatePreferences` refuses non-members), and the free plan's editor
+reads them from there; they move into the account when the person joins. On a device set to **reduce motion**, canvas leaves them off (the settings page says so),
 and page animations keep only their fades (`MotionProvider` in the root layout).
 
 ### Scroll animations
@@ -1036,7 +1048,8 @@ src/
     app-sidebar.tsx              dark sidebar: bottom bar on phones, icon rail on tablets (not in the editor)
     user-menu.tsx                avatar + account menu (Settings, Membership, Sign out); GuestMenu without an account
     motion/                      Reveal (slide in and out on scroll) and MotionProvider (reduced motion)
-    settings/                    profile (picture and name) and effects, with their live examples
+    settings/                    profile (picture and name) and effects, with their live examples;
+                                 move-browser-profile.tsx moves them into the account when someone joins
     auth/auth-form.tsx           login and sign-up forms
     auth/account-forms.tsx       confirm-email, forgot-password and new-password forms
     auth/captcha.tsx             the Turnstile widget hook (waits for the check, fresh token per try)
@@ -1121,7 +1134,8 @@ src/
     canvas/effects.ts            drawing effects: fade, pop and trace in and out (Motion)
     canvas/kanban-fx.ts          to-do board effects: glides, pop-ins, the done line, the bar (Motion)
     preferences.ts               the settings page's choices: types, defaults, parsing
-    profile/                     profile pictures (URLs, type sniffing; storing and serving) and names
+    profile/                     profile pictures (URLs, type sniffing; storing and serving) and names;
+                                 browser-profile.ts keeps a non-member's picture and effect choices in the browser
     canvas/geometry.ts           bounds, hit-testing, lasso, move/resize
     canvas/images.ts             images, GIF and video players, local cache, uploads
     http/range.ts                HTTP Range header parsing
@@ -1389,13 +1403,14 @@ Google, it checks the client secret, the redirect URI and the PKCE verifier. `GO
   board; her pen stroke on his board while she's still drawing, not yet part of the drawing, growing,
   then landing without a gap or double; a rectangle as she drags it; his strokes reaching her as he
   draws, with his initials; and only finished elements saved.
-- `e2e/test-free.mjs` (64 checks): the free plan and joining. A visitor's Start drawing opening a
+- `e2e/test-free.mjs` (74 checks): the free plan and joining. A visitor's Start drawing opening a
   drawing with no account, drawing, a title and a picture kept in the browser's library and back
   after reloading, with nothing about it sent to the server; Check math, Chemistry, Share, the tool
   search and the selection's Check math offering the membership; the APIs refusing without an
   account; a second tab looking but not editing, then taking over when the first one leaves; `/local` (New Drawing, Delete, a drawing that isn't
   there); both plans on the pricing page; a signed-in non-member's home, whose New Drawing stays in
-  the browser; paying moving the browser's drawings into the account (same id, title, contents and picture) and removing the browser's copy;
+  the browser; their profile picture and effect choices kept in the browser, not the server; paying
+  moving the browser's drawings, picture and effect choices into the account (same id, title, contents and picture) and removing the browser's copy;
   a member moving one from the editor and one from the home page; importing again leaving the
   account's copy alone; and a membership ending keeping the account's drawings.
 - `e2e/test-dock.mjs` (31 checks): the tool dock and search. Six slots holding every tool in one row;
