@@ -131,7 +131,7 @@ function MemberView({ membership, welcome }: { membership: Membership; welcome: 
         ) : ending && sub.cancelAt ? (
           <>
             It ends on <LocalDate iso={sub.cancelAt.toISOString()} />, and you won&apos;t be charged again. You can
-            renew any time before then in billing.
+            renew any time before then in billing. After it ends, what&apos;s in your account is kept for 30 days.
           </>
         ) : sub.currentPeriodEnd ? (
           <>

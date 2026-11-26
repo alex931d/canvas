@@ -90,12 +90,18 @@ export async function listSharedWithMe(): Promise<SharedDrawingSummary[]> {
     .orderBy(desc(drawings.updatedAt));
 }
 
-/** How many drawings the signed-in user keeps in their account (shown when a membership has ended). */
-export async function countOwnDrawings(): Promise<number> {
+/**
+ * The drawings still in the signed-in user's account, for after a membership
+ * ends (they can move them into their browser before they're deleted).
+ */
+export async function listKeptDrawings(): Promise<{ id: string; title: string; thumbnail: string | null; updatedAt: Date }[]> {
   await io();
   const user = await requireUser();
-  const [row] = await db.select({ n: count() }).from(drawings).where(eq(drawings.userId, user.id));
-  return row?.n ?? 0;
+  return db
+    .select({ id: drawings.id, title: drawings.title, thumbnail: drawings.thumbnail, updatedAt: drawings.updatedAt })
+    .from(drawings)
+    .where(eq(drawings.userId, user.id))
+    .orderBy(desc(drawings.updatedAt));
 }
 
 export async function countImages(): Promise<number> {

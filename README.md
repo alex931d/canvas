@@ -425,8 +425,26 @@ and an id that belongs to someone else's drawing is refused. Members who find dr
 browser later (made while signed out, say) get **Move them to your account** on their home page, and
 **Move to your account** in the editor (Share leads there too).
 
-**When a membership ends**, the drawings in the account are kept. The home page says how many and
-offers to renew; new drawings are saved in the browser until then.
+**When a membership ends**, what the account holds on the server (drawings with their files,
+flashcards, the profile picture and settings) is kept for 30 days, then deleted unless they renew
+(`src/lib/billing/lapsed.ts`):
+
+- An hourly sweep (started by `src/instrumentation.ts`; `STORAGE_SWEEP_SECONDS` changes how often, 0
+  turns it off on that server) finds anyone without a membership who still holds drawings, flashcards
+  or a picture, gives them a date 30 days on (`storage_deletions`), and emails them: when it'll be
+  deleted, the link to renew, and how to keep drawings on the free plan. A week before, a reminder.
+  On the day it deletes it all (people a deleted drawing was shared with see that the owner deleted
+  it); the account itself stays.
+- Renewing clears the date; ending again starts a new 30 days. Anyone who no longer holds anything
+  (they moved it all to their browser, or deleted it) is forgotten.
+- Their home page says what will be deleted and when, offers to renew, and lists the account's
+  drawings with **Move here** (and **Move all into this browser**): `BrowserDrawingMover.intoBrowser`
+  reads the drawing from `GET /api/drawings/[id]/export` (the owner, with or without a membership),
+  then each of its files (owners can read their own files without a membership), keeps them in the
+  browser under the same id and only then deletes the server's copy. Flashcards are a member
+  feature and aren't moved.
+- Only one server sweeps at a time (`pg_try_advisory_xact_lock`), and a failed email is tried again
+  on the next sweep.
 
 ### The membership
 
@@ -460,9 +478,9 @@ menu; anyone without a membership who opens it goes to `/pricing`.
   Checkout, so a new member can start straight away.
 - Someone is a member while a subscription is `active`, `trialing` or `past_due` (Stripe is still
   retrying a failed payment). A cancelled membership runs until the end of the paid month.
-- When a membership ends, the drawings stay in the database and in the browser. An editor that's open
-  stops syncing, says so, and syncs everything once they renew. Until then the person is on the free
-  plan (see above).
+- When a membership ends, the drawings stay in the database for 30 days (see above) and in the
+  browser. An editor that's open stops syncing, says so, and syncs everything once they renew. Until
+  then the person is on the free plan.
 - `users.stripe_customer_id` links each account to one Stripe customer, created the first time they
   start a membership and reused after that.
 - Complimentary memberships (for you, testers, friends) are rows whose id starts with `comp_`:
@@ -1040,6 +1058,7 @@ src/
     api/drawings/[id]/thumbnail  POST the gallery preview
     api/drawings/[id]/assets     POST an image, GIF or video (multipart)
     api/drawings/import          POST a drawing from the browser into a new member's account (same id; safe to retry)
+    api/drawings/[id]/export     GET a drawing and its file list for its owner, to take into the browser
     api/assets/[id]              GET it (cached forever; ids never change), with byte ranges
     api/flashcards               POST a card (multipart, with an optional picture); [id]/image serves it
     api/check-math               POST a selection image -> verdict JSON
@@ -1090,7 +1109,8 @@ src/
     editor/slides-panel.tsx      the frames as slides: order, titles, pictures, style, Present
     editor/presenter.tsx         full-screen slides: keys, swipes, fade / slide / fly
     gallery/                     overview cards, drawing grids, delete / leave / move between workspaces;
-                                 browser-gallery.tsx: this browser's drawings and moving them into an account
+                                 browser-gallery.tsx: this browser's drawings and moving them into an account;
+                                 kept-drawings.tsx: after a membership ends, moving the account's into the browser
     workspaces/                  new workspace form, invitations, the people panel, the name and its menu
     study/                       review session, card list
     kit/                         the component kit: buttons, fields, menus, dialogs, toasts…
@@ -1099,6 +1119,7 @@ src/
                                  profile pictures, preferences
   proxy.ts                       landing page or drawings at /, sign-in redirects, cookie refresh,
                                  cross-site request check
+  instrumentation.ts             on server start: the hourly storage sweep
   lib/
     auth/session.ts              tokens, validation, cookies, getCurrentSession, requireUser
     auth/password.ts             Argon2id hashing, breached-password check
@@ -1125,6 +1146,7 @@ src/
     billing/plan.ts              the plans: free and $5 a month, what each includes, canUse
     billing/stripe.ts            the Stripe client and its settings
     billing/membership.ts        who's a member: getMembership, requireMember, getViewerPlan
+    billing/lapsed.ts            ended memberships: the 30-day date, its emails, deleting the account's server data
     billing/sync.ts              Stripe customers, and copying subscriptions from Stripe
     canvas/schema.ts             drawing JSON format (zod), shared by client and server
     canvas/render.ts             Canvas 2D rendering, exports, thumbnails
@@ -1202,6 +1224,9 @@ stops when the system asks for reduced motion.
 `subscriptions`: `id` (Stripe's `sub_...`, or `comp_...`), `user_id` (cascade delete), `customer_id`,
 `status`, `price_id`, `current_period_end`, `cancel_at` (set once cancelled), `ended_at`. See
 [Free and membership](#free-and-membership).
+`storage_deletions`: `user_id` (cascade delete), `ended_at`, `delete_after`, `warned_at`,
+`reminded_at`: whose server data is due to be deleted after their membership ended, and which emails
+have gone.
 `drawings`: `id`, `user_id` (the owner), `title`, `data` (jsonb), `presentation` (jsonb: `style`,
 `stage`, `numbers`; null until set, see [Frames and presenting](#frames-and-presenting)), `thumbnail`,
 `version` (bumped by every applied change), `share_token` (the invite link's secret, null when off),
@@ -1309,7 +1334,7 @@ TURNSTILE_SCRIPT_URL=http://localhost:4030/turnstile/v0/api.js \
 TURNSTILE_VERIFY_URL=http://localhost:4030/turnstile/v0/siteverify \
 GOOGLE_CLIENT_ID=mock-client.apps.googleusercontent.com GOOGLE_CLIENT_SECRET=mock-google-secret \
 GOOGLE_AUTH_URL=http://localhost:4040/o/oauth2/v2/auth GOOGLE_TOKEN_URL=http://localhost:4040/token \
-ENCRYPTION_KEY="$(openssl rand -base64 32)" npm start
+STORAGE_SWEEP_SECONDS=2 ENCRYPTION_KEY="$(openssl rand -base64 32)" npm start
 AI_MODEL=mock-vision npm run test:e2e                    # in another terminal
 ```
 
@@ -1403,7 +1428,7 @@ Google, it checks the client secret, the redirect URI and the PKCE verifier. `GO
   board; her pen stroke on his board while she's still drawing, not yet part of the drawing, growing,
   then landing without a gap or double; a rectangle as she drags it; his strokes reaching her as he
   draws, with his initials; and only finished elements saved.
-- `e2e/test-free.mjs` (74 checks): the free plan and joining. A visitor's Start drawing opening a
+- `e2e/test-free.mjs` (88 checks): the free plan and joining. A visitor's Start drawing opening a
   drawing with no account, drawing, a title and a picture kept in the browser's library and back
   after reloading, with nothing about it sent to the server; Check math, Chemistry, Share, the tool
   search and the selection's Check math offering the membership; the APIs refusing without an
@@ -1412,7 +1437,11 @@ Google, it checks the client secret, the redirect URI and the PKCE verifier. `GO
   the browser; their profile picture and effect choices kept in the browser, not the server; paying
   moving the browser's drawings, picture and effect choices into the account (same id, title, contents and picture) and removing the browser's copy;
   a member moving one from the editor and one from the home page; importing again leaving the
-  account's copy alone; and a membership ending keeping the account's drawings.
+  account's copy alone; and a membership ending: home saying when the account's drawings will be
+  deleted (30 days), the email, Move here taking one into the browser with its picture and freeing
+  the server's copy, renewing clearing the date and ending again setting a new one, the reminder a
+  week before, and on the day the drawings, picture and settings deleted while the account and the
+  browser's drawings stay.
 - `e2e/test-dock.mjs` (31 checks): the tool dock and search. Six slots holding every tool in one row;
   a group's arrow listing its tools, the slot remembering the last one, a second press opening it,
   keys moving the dock along, Insert's list, Undo and Redo; the search (/ and ⌘K, other words,

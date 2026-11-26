@@ -418,16 +418,76 @@ check(
 );
 
 // ------------------------------------------------------------ when the membership ends
+// The test server sweeps every couple of seconds (STORAGE_SWEEP_SECONDS); in production it's hourly.
+const { waitForEmail } = await import("./helpers.mjs");
+const schedule = () => sql(`select coalesce(round(extract(epoch from delete_after - now()) / 86400), -1) from storage_deletions where user_id = '${me.id}'`);
+const endedAt = Date.now();
 sql(`update subscriptions set status = 'canceled', ended_at = now() where user_id = '${me.id}'`);
 await page.goto(BASE, { waitUntil: "networkidle0" });
 await page.waitForSelector("[data-testid=free-plan]", { timeout: 10_000 });
 check(
-  "after it ends, the home page says the account's drawings are kept",
-  /Your membership has ended/.test(await text()) && /4 drawings in your account are kept safe/.test(await text()),
+  "after it ends, home says when the account's drawings will be deleted",
+  /Your membership has ended/.test(await text()) &&
+    /4 drawings in your account will be deleted on/.test(await text()) &&
+    !!(await page.$("[data-testid=delete-on] time")),
   (await text()).slice(0, 400),
 );
+check("in 30 days", schedule() === "30", schedule());
 check("and offers to renew", !!(await page.$("[data-testid=free-plan] a[href='/pricing']")));
-check("they're still in the database", sql(`select count(*) from drawings where user_id = '${me.id}'`) === "4");
+const ended = await waitForEmail(me.email, /membership has ended/, { after: endedAt, timeout: 15_000 }).catch(() => null);
+check(
+  "an email says so, with the date and both ways to keep them",
+  !!ended && /4 drawings/.test(ended.subject) && /Renew/.test(ended.text) && /move them into your browser/.test(ended.text),
+  ended?.subject,
+);
+check("the account's drawings are listed to move", (await page.$$("[data-testid=kept-drawings] li")).length === 4);
+
+// Moving one into the browser frees its server copy.
+await page.click(`[data-testid=kept-drawings] li[data-drawing='${firstId}'] button`);
+await waitFor(async () => sql(`select count(*) from drawings where id = '${firstId}'`) === "0", 15_000);
+check("Move here takes a drawing into this browser", sql(`select count(*) from drawings where id = '${firstId}'`) === "0");
+const back = await waitFor(async () => {
+  const l = await library();
+  return l.drawings.some((d) => d.id === firstId) && l.assets.some((a) => a.drawingId === firstId) ? l : null;
+});
+check("with its title and its picture", back?.drawings.find((d) => d.id === firstId)?.title === "Free notes" && !!back);
+check("its files are gone from the server too", sql(`select count(*) from assets where drawing_id = '${firstId}'`) === "0");
+await page.goto(`${BASE}/local/${firstId}`, { waitUntil: "load" });
+await ready();
+await waitFor(async () => (await items()) === 2);
+check("and it opens from the browser, all there", (await items()) === 2);
+
+// Renewing clears the date; ending again sets a new one.
+sql(`insert into subscriptions (id, user_id, status) values ('comp_' || gen_random_uuid(), '${me.id}', 'active')`);
+await waitFor(async () => schedule() === "", 10_000);
+check("renewing clears the date", schedule() === "");
+sql(`update subscriptions set status = 'canceled' where user_id = '${me.id}' and status = 'active'`);
+await waitFor(async () => schedule() === "30", 10_000);
+check("ending again starts a new 30 days", schedule() === "30", schedule());
+
+// A week before, a reminder.
+const remindFrom = Date.now();
+sql(`update storage_deletions set delete_after = now() + interval '6 days', reminded_at = null where user_id = '${me.id}'`);
+const reminder = await waitForEmail(me.email, /^Your 3 drawings on canvas will be deleted on/, { after: remindFrom, timeout: 15_000 }).catch(() => null);
+check("a week before, a reminder", !!reminder && /Renew to keep everything/.test(reminder.text), reminder?.subject);
+
+// The day comes: all of it goes.
+await page.goto(BASE, { waitUntil: "networkidle0" });
+sql(`update storage_deletions set delete_after = now() - interval '1 minute' where user_id = '${me.id}'`);
+const deleted = await waitFor(async () => sql(`select count(*) from drawings where user_id = '${me.id}'`) === "0", 15_000);
+check("on the day, the account's drawings are deleted", !!deleted);
+check(
+  "and its picture, settings and the schedule",
+  sql(`select count(*) from user_avatars where user_id = '${me.id}'`) === "0" &&
+    sql(`select count(*) from user_preferences where user_id = '${me.id}'`) === "0" &&
+    sql(`select avatar_updated_at is null from users where id = '${me.id}'`) === "t" &&
+    schedule() === "",
+);
+check("the account itself stays", sql(`select count(*) from users where id = '${me.id}'`) === "1");
+check("the drawing in this browser is untouched", (await library()).drawings.some((d) => d.id === firstId));
+await page.goto(BASE, { waitUntil: "networkidle0" });
+await page.waitForSelector("[data-testid=free-plan]", { timeout: 10_000 });
+check("home is the free plan again", !(await page.$("[data-testid=delete-on]")) && !(await page.$("[data-testid=kept-drawings]")));
 
 check("no page errors", problems.length === 0, problems.slice(0, 3).join(" | "));
 await browser.close();

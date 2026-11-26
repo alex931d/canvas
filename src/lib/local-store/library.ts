@@ -94,17 +94,27 @@ export class BrowserLibrary {
 
   // ------------------------------------------------------------ writing
 
-  /** A new, empty drawing (or one made from `from`, e.g. a backup). */
-  async create(from?: { title?: string; data?: DrawingData; presentation?: Presentation }): Promise<BrowserDrawing> {
+  /**
+   * A new, empty drawing, or one made from `from` (a drawing brought in
+   * from an account keeps its id, picture and dates).
+   */
+  async create(from?: {
+    id?: string;
+    title?: string;
+    data?: DrawingData;
+    presentation?: Presentation;
+    thumbnail?: string | null;
+    updatedAt?: number;
+  }): Promise<BrowserDrawing> {
     const now = Date.now();
     const data = from?.data ?? emptyDrawing();
     const drawing: BrowserDrawing = {
-      id: newBatchId(),
+      id: from?.id ?? newBatchId(),
       title: from?.title?.trim() || "Untitled",
-      thumbnail: null,
+      thumbnail: from?.thumbnail ?? null,
       items: data.elements.length,
       createdAt: now,
-      updatedAt: now,
+      updatedAt: from?.updatedAt ?? now,
       data,
       presentation: from?.presentation ?? DEFAULT_PRESENTATION,
     };

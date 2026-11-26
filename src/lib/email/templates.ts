@@ -229,3 +229,82 @@ export function workspaceInviteEmail({
   );
   return { subject, text, html };
 }
+
+/** What's held in an account after its membership ended, in words: "3 drawings and 12 flashcards". */
+function heldWords({ drawings, flashcards }: { drawings: number; flashcards: number }) {
+  const parts = [
+    drawings ? `${drawings} ${drawings === 1 ? "drawing" : "drawings"}` : null,
+    flashcards ? `${flashcards} ${flashcards === 1 ? "flashcard" : "flashcards"}` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(" and ") : "profile picture";
+}
+
+type Held = {
+  name: string;
+  drawings: number;
+  flashcards: number;
+  /** The day it goes, written out ("December 26, 2026"). */
+  deleteOn: string;
+  /** Where to renew and where to move drawings into the browser; null when the site's address isn't known. */
+  pricingLink: string | null;
+  homeLink: string | null;
+};
+
+/** Sent when a membership ends with things still in the account: what happens, and when. */
+export function storageEndedEmail(held: Held): Message {
+  const what = heldWords(held);
+  const subject = `Your canvas membership has ended: your ${what} will be deleted on ${held.deleteOn}`;
+  const steps = [
+    `Renew any time before then and everything stays as it is${held.pricingLink ? `: ${held.pricingLink}` : "."}`,
+    `Or keep your drawings for free: open canvas${held.homeLink ? ` (${held.homeLink})` : ""} and move them into your browser from the home page. Flashcards are part of the membership and can't be moved.`,
+  ];
+  const text = [
+    `Hi ${held.name},`,
+    "",
+    `Your canvas membership has ended. Without a membership, canvas keeps drawings in your browser rather than on our server, so the ${what} in your account will be deleted on ${held.deleteOn}, 30 days from now.`,
+    "",
+    ...steps,
+    "",
+    "We'll remind you a week before.",
+  ].join("\n");
+  const html = page(
+    subject,
+    p(`Hi ${esc(held.name)},`) +
+      p(
+        `Your canvas membership has ended. Without a membership, canvas keeps drawings in your browser rather than on our server, so the <strong>${esc(what)}</strong> in your account will be deleted on <strong>${esc(held.deleteOn)}</strong>, 30 days from now.`,
+      ) +
+      (held.pricingLink ? button(held.pricingLink, "Renew membership") : "") +
+      p(
+        `Or keep your drawings for free: open canvas${held.homeLink ? ` (<a href="${esc(held.homeLink)}" style="color:#201f24;">${esc(held.homeLink)}</a>)` : ""} and move them into your browser from the home page. Flashcards are part of the membership and can't be moved.`,
+      ) +
+      p("We'll remind you a week before.", true),
+  );
+  return { subject, text, html };
+}
+
+/** A week before the account's drawings and flashcards are deleted. */
+export function storageReminderEmail(held: Held): Message {
+  const what = heldWords(held);
+  const subject = `Your ${what} on canvas will be deleted on ${held.deleteOn}`;
+  const text = [
+    `Hi ${held.name},`,
+    "",
+    `A reminder: your canvas membership has ended, and the ${what} in your account will be deleted on ${held.deleteOn}, a week from now.`,
+    "",
+    `Renew to keep everything${held.pricingLink ? `: ${held.pricingLink}` : "."}`,
+    `Or move your drawings into your browser from the home page${held.homeLink ? ` (${held.homeLink})` : ""} to keep them on the free plan.`,
+  ].join("\n");
+  const html = page(
+    subject,
+    p(`Hi ${esc(held.name)},`) +
+      p(
+        `A reminder: your canvas membership has ended, and the <strong>${esc(what)}</strong> in your account will be deleted on <strong>${esc(held.deleteOn)}</strong>, a week from now.`,
+      ) +
+      (held.pricingLink ? button(held.pricingLink, "Renew membership") : "") +
+      p(
+        `Or move your drawings into your browser from the home page${held.homeLink ? ` (<a href="${esc(held.homeLink)}" style="color:#201f24;">${esc(held.homeLink)}</a>)` : ""} to keep them on the free plan.`,
+        true,
+      ),
+  );
+  return { subject, text, html };
+}

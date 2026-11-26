@@ -53,6 +53,72 @@ export class BrowserDrawingMover {
     return id;
   }
 
+  // ------------------------------------------------- into the browser
+
+  /**
+   * The other way, after a membership ends: an account drawing comes into
+   * this browser (same id, its files first), then the server's copy is
+   * deleted, freeing the space. Anything that goes wrong leaves it where it
+   * was. Resolves the ids that moved, and why the others didn't.
+   */
+  async intoBrowser(ids: string[], onProgress?: (p: MoveProgress) => void): Promise<MoveResult> {
+    const result: MoveResult = { moved: [], failed: [] };
+    for (const [i, id] of ids.entries()) {
+      onProgress?.({ done: i, total: ids.length, title: null });
+      try {
+        const title = await this.takeIntoBrowser(id);
+        onProgress?.({ done: i, total: ids.length, title });
+        result.moved.push(id);
+      } catch (err) {
+        result.failed.push({ id, title: "", reason: err instanceof Error ? err.message : "It couldn't be moved." });
+        if (err instanceof MoveError && err.stopAll) break;
+      }
+    }
+    onProgress?.({ done: ids.length, total: ids.length, title: null });
+    return result;
+  }
+
+  private async takeIntoBrowser(id: string): Promise<string> {
+    const res = await this.send(() => fetch(`/api/drawings/${id}/export`, { cache: "no-store" }));
+    const drawing = (await res.json()) as {
+      title: string;
+      data: BrowserDrawing["data"];
+      presentation: BrowserDrawing["presentation"];
+      thumbnail: string | null;
+      updatedAt: string;
+      files: { id: string; mimeType: string; width: number; height: number }[];
+    };
+    const shown = assetIdsOf(drawing.data.elements);
+    try {
+      for (const file of drawing.files.filter((f) => shown.has(f.id))) {
+        const blob = await (await this.send(() => fetch(`/api/assets/${file.id}`))).blob();
+        const kept = await this.library.putAsset({
+          id: file.id,
+          drawingId: id,
+          blob: blob.type ? blob : new Blob([blob], { type: file.mimeType }),
+          mimeType: file.mimeType,
+          width: file.width,
+          height: file.height,
+        });
+        if (!kept) throw new MoveError("This browser's storage is full, so it stayed in your account.", true);
+      }
+      await this.library.create({
+        id,
+        title: drawing.title,
+        data: drawing.data,
+        presentation: drawing.presentation,
+        thumbnail: drawing.thumbnail,
+        updatedAt: Date.parse(drawing.updatedAt) || Date.now(),
+      });
+    } catch (err) {
+      await this.library.delete(id).catch(() => undefined); // nothing half-copied left behind
+      throw err;
+    }
+    // The browser has it all: free the server's copy.
+    await deleteDrawing(id).catch(() => undefined);
+    return drawing.title;
+  }
+
   // ----------------------------------------------------------- plumbing
 
   private async run(only: string[] | null, onProgress?: (p: MoveProgress) => void): Promise<MoveResult> {
@@ -134,6 +200,7 @@ export class BrowserDrawingMover {
       const status = res?.status ?? 0;
       if (status === 401) throw new MoveError("You've been signed out. Log in again to move your drawings.", true);
       if (status === 402) throw new MoveError("Moving drawings into an account is part of the membership.", true);
+      if (status === 404) throw new MoveError("It isn't in your account any more.");
       const retryable = status === 0 || status === 429 || status >= 500;
       if (!retryable || attempt >= RETRIES) {
         const body = res ? ((await res.json().catch(() => ({}))) as { error?: string }) : {};

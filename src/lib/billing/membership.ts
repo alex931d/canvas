@@ -13,7 +13,8 @@ import type { Plan } from "./plan";
  * is still retrying a failed renewal; access continues until it gives up and
  * the status becomes `canceled` or `unpaid`.
  */
-const MEMBER_STATUSES = new Set(["active", "trialing", "past_due"]);
+export const MEMBER_STATUS_LIST = ["active", "trialing", "past_due"];
+const MEMBER_STATUSES = new Set(MEMBER_STATUS_LIST);
 
 export type Membership = {
   isMember: boolean;
