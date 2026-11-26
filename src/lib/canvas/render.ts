@@ -10,6 +10,7 @@ import {
   TEXT_LINE_HEIGHT,
   type CanvasElement,
   type DrawingData,
+  type FrameElement,
   type LineElement,
   type MathElement,
   type MediaElement,
@@ -47,6 +48,13 @@ export type RenderEnv = {
   draggingCardId?: string | null;
   /** To-do board animations in progress (src/lib/canvas/kanban-fx.ts). */
   kanbanFx?: KanbanFxView | null;
+  /**
+   * Frames' outlines and titles, labelled "1  Title" by this. Left out
+   * (exports, thumbnails, presenting), frames don't show at all.
+   */
+  frameLabel?: ((el: FrameElement) => string) | null;
+  /** A frame being pointed at or selected: its outline is drawn stronger. */
+  activeFrameIds?: ReadonlySet<string> | null;
 };
 
 /**
@@ -294,8 +302,41 @@ export function drawElement(ctx: Ctx, el: CanvasElement, env: RenderEnv) {
     case "kanban":
       drawKanban(ctx, el, env.draggingCardId ?? null, env.kanbanFx ?? null);
       break;
+    case "frame":
+      if (env.frameLabel) drawFrame(ctx, el, env.frameLabel(el), !!env.activeFrameIds?.has(el.id));
+      break;
   }
   ctx.restore();
+}
+
+/** One CSS pixel in world units, from the current transform (frames' chrome stays the same size at any zoom). */
+function cssPixel(ctx: Ctx) {
+  const m = ctx.getTransform();
+  const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
+  return dpr / (Math.hypot(m.a, m.b) || 1);
+}
+
+export const FRAME_LABEL_FONT = 12;
+export const FRAME_LABEL_GAP = 6;
+
+/** A frame in the editor: a thin outline, and its number and title above the top-left corner. */
+function drawFrame(ctx: Ctx, el: FrameElement, label: string, active: boolean) {
+  const px = cssPixel(ctx);
+  ctx.strokeStyle = active ? "#277c78" : "#b3b3b3";
+  ctx.lineWidth = (active ? 2 : 1.25) * px;
+  ctx.setLineDash(active ? [] : [6 * px, 4 * px]);
+  ctx.strokeRect(el.x, el.y, el.w, el.h);
+  ctx.setLineDash([]);
+  ctx.font = `600 ${FRAME_LABEL_FONT * px}px "Public Sans", ui-sans-serif, system-ui, sans-serif`;
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = active ? "#277c78" : "#696868";
+  ctx.fillText(label, el.x, el.y - FRAME_LABEL_GAP * px, Math.max(el.w, 40 * px));
+}
+
+/** Where a frame's title sits on screen-independent terms: for hit-testing it, given one CSS pixel in world units. */
+export function frameLabelRect(el: FrameElement, label: string, px: number): Rect {
+  const w = Math.min(Math.max(el.w, 40 * px), label.length * FRAME_LABEL_FONT * 0.62 * px);
+  return { x: el.x, y: el.y - (FRAME_LABEL_FONT + FRAME_LABEL_GAP + 2) * px, w, h: (FRAME_LABEL_FONT + 4) * px };
 }
 
 /** A GIF or video frame, with a play button while a video is paused. */
@@ -402,13 +443,18 @@ export function drawScene(
   skip?: ReadonlySet<string>,
   fx?: (el: CanvasElement) => FxState | undefined,
 ) {
-  for (const el of elements) {
-    if (skip?.has(el.id)) continue;
-    // Erasers must always run so holes stay holes even if the eraser is offscreen-adjacent.
-    if (view && el.type !== "eraser" && !rectsIntersect(elementBounds(el), view)) continue;
-    const state = fx?.(el);
-    if (state) drawElementFx(ctx, el, env, state);
-    else drawElement(ctx, el, env);
+  // Frames last: only an outline and a title, kept clear of pixel erasers and never hidden by what's in them.
+  for (const pass of [false, true]) {
+    for (const el of elements) {
+      if ((el.type === "frame") !== pass) continue;
+      if (pass && !env.frameLabel) continue;
+      if (skip?.has(el.id)) continue;
+      // Erasers must always run so holes stay holes even if the eraser is offscreen-adjacent.
+      if (view && el.type !== "eraser" && !rectsIntersect(elementBounds(el), view)) continue;
+      const state = fx?.(el);
+      if (state) drawElementFx(ctx, el, env, state);
+      else drawElement(ctx, el, env);
+    }
   }
 }
 

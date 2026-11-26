@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { Presentation } from "@/lib/canvas/schema";
 import { bus } from "./bus";
 import { hub } from "./hub";
 
@@ -32,8 +33,8 @@ export type HubMessage =
       hello?: boolean;
       bye?: boolean;
     }
-  /** The title changed. */
-  | { t: "meta"; d: string; title: string }
+  /** The title or the presentation style changed. */
+  | { t: "meta"; d: string; title?: string; presentation?: Presentation }
   /** Sharing changed: subscribers re-check what they're allowed. */
   | { t: "access"; d: string }
   /** The owner deleted the drawing. */

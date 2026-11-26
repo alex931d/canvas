@@ -22,6 +22,11 @@ animation, and its own component kit (with Radix underneath for menus and dialog
 - **To-do boards**: To do, Doing and Done columns of cards on the canvas, next to your notes. Drag cards
   between columns and between boards.
 - **Select, move, resize, duplicate, delete**, copy and paste, undo and redo.
+- **Team workspaces** for a class, a study group or a team: invite people once (by link or email),
+  and everyone in it can open its drawings (see [Team workspaces](#team-workspaces)).
+- **Slides from the canvas**: draw frames (F) around parts of a drawing and present them full screen,
+  fading, sliding, or flying across the canvas from one to the next (see
+  [Frames and presenting](#frames-and-presenting)).
 - **AI math check**: press **Check math**, draw a loop around an equation (handwritten or a
   screenshot), and a vision model transcribes it, checks each step, and shows where it goes
   wrong. **Add note to canvas** writes the verdict next to your work.
@@ -149,7 +154,7 @@ Without a key, everything else works and **Check math** explains how to set it u
 | `npm run role -- set <email> <role>\|show <email>\|list` | Roles: make the first admin (see [Roles](#roles-and-the-admin-dashboard)) |
 | `npm run typecheck` | Generate route types and run `tsc` |
 | `npm run test:e2e` | Browser tests (see below) |
-| `npm run test:unit` | Quick checks of the chemistry, graph, collaboration and calendar logic, no browser needed, then the rate limits against a throwaway `redis-server` |
+| `npm run test:unit` | Quick checks of the chemistry, graph, collaboration, calendar, picture-tracing, slide and workspace-role logic, no browser needed, then the rate limits against a throwaway `redis-server` |
 
 ## Accounts and sessions
 
@@ -574,6 +579,108 @@ Decorations for Easter, Halloween and Christmas on the landing and pricing pages
   elements given as intervals); elements with no stable isotopes show the mass number of their
   longest-lived isotope. Any result can go onto the canvas as a typeset equation.
 
+### Tracing a picture
+
+**Trace a picture (U)** turns a photo or screenshot of an equation (math, chemistry, anything written
+or printed) into pen strokes. Choose the picture, drag a box around the part you want (it starts
+around the writing it finds), and the preview shows the strokes it becomes, in your pen colour.
+**Add to canvas** puts them in the middle of the view, selected; they're ordinary strokes, so they can
+be moved, recoloured, erased, checked with **Check math** or turned into a flashcard, and one undo
+takes them all off. The box moves with the arrow keys and resizes with Shift and the arrow keys.
+
+It all happens in the browser (`src/lib/canvas/trace.ts`, `trace-picture-dialog.tsx`); the picture
+isn't uploaded or kept.
+
+1. The box is copied at about 1,000 pixels across (small screenshots are enlarged up to 4×, so thin
+   lines have room).
+2. **Ink or paper**, per pixel: darker than the average of the pixels around it (Bradley's adaptive
+   threshold, so shade and uneven light in photos don't become ink) and clearly darker than the paper.
+   A blackboard or dark screenshot is recognised and flipped (the **Light writing on a dark
+   background** switch overrides it). **Detail** trades fainter lines against specks.
+3. Specks smaller than a fraction of a pen dot are dropped; pinholes in the ink are filled.
+4. The ink is thinned to lines one pixel wide (Zhang–Suen), walked into strokes (loose ends, then
+   branches out of crossings, then closed loops), ragged-edge spurs are dropped, and each stroke is
+   simplified (Ramer–Douglas–Peucker).
+5. Each stroke's pen width comes from the ink under it (twice the distance from its middle to its
+   edge), so dots (decimal points, multiplication dots, charges) stay dots and bold bars stay bold.
+
+A box with more than 2,000 strokes is refused (that's a page, not an equation): make it smaller or
+lower Detail. Pictures are sized like inserted images: a screenshot keeps its on-screen size, a phone
+photo is shrunk to fit 60 % of the view.
+
+## Frames and presenting
+
+A **frame** marks part of the canvas as a slide. Pick **Frame (a slide)** (F), choose its shape in the
+bar above the board (**16:9**, **4:3**, **Square** or **Any**; Shift draws any shape, or a square when
+the shape is Any) and drag around what the slide should show, or click for one most of the size of the
+view. Frames are a thin outline with their title above; they never show in exports, gallery pictures,
+**Check math** or while presenting.
+
+- **Moving a frame takes what's inside it along** (everything wholly inside; hold **Alt** to move the
+  frame alone). Grab it by its title or its edge: a click inside a frame picks what's drawn there.
+- Resizing keeps the shape (Shift: any shape). The eraser leaves frames alone; Delete removes one.
+- Select a frame for **Present** and **Rename** next to it; double-click its title to rename it in
+  the Slides panel.
+
+**Slides** (in the top bar; under the menu on phones) lists the frames in the order they're shown,
+with a picture of each: rename them, move them up and down, delete a frame (what's drawn there stays),
+present from any of them, or make a **New slide** around what's selected (or in the middle of the
+view). It also sets how the drawing is presented, saved with it and changed live for everyone looking:
+
+- **Moving between slides**: **Fade**; **Slide**, where slides push in from the side; or **Fly**, where
+  the view flies across the canvas from frame to frame (pulling back to show both when they're far
+  apart), so people see how the parts connect.
+- **Around each slide**: **Dark**, or the drawing's own **canvas colour**.
+- **Slide numbers** in the corner.
+
+**Present** fills the screen (full screen where the browser allows). → ↓ Space Enter or a click go on,
+← ↑ Backspace or a click on the left edge go back, Home and End jump, **F** toggles full screen and
+**Esc** stops, leaving the board on the slide you were on. On phones and tablets, swipe; tapping the
+middle shows the controls. Edits other people make while you present appear as they happen; with
+"reduce motion" turned on in the device's settings, slides change without moving.
+
+How it works: a frame is an element like any other (`{ type: "frame", x, y, w, h, title, order }`), so
+it syncs, undoes and merges the same way; `order` is a number, with ties broken by position, and
+reordering renumbers 1, 2, 3. The presentation style is `drawings.presentation` (jsonb), saved by the
+`savePresentation` action and announced to open editors in the live stream's `meta` event. Slides are
+drawn with the same renderer as exports (`renderRegion`, one picture per slide at screen size,
+cached); a fly is a smooth zoom-and-pan through the whole canvas (van Wijk and Nuij's path,
+`src/lib/canvas/present.ts`) with the stage veiling all but the frame, lifting mid-flight.
+
+## Team workspaces
+
+**Workspaces** (in the sidebar) is where groups keep drawings together. Make one by naming it; you're
+its owner. Everyone in a workspace can open its drawings, with their workspace role:
+
+| Role | What they can do |
+| --- | --- |
+| Owner | Everything below, plus make people admins, and delete the workspace |
+| Admin | Invite people, change editors and viewers, remove them, rename the workspace, take drawings out |
+| Can edit | Make drawings in it (**New Drawing** on its page) and draw on all of its drawings, live |
+| Can view | Open its drawings and follow along as they change |
+
+- **Inviting**: by **email** (a link that works for 14 days, for an account with that confirmed
+  address; it also waits on their Workspaces page, to join without the link), or with the
+  workspace's **invite link** (anyone with a membership who opens it joins, as an editor or a viewer;
+  **New link** replaces it, and turning it off keeps who already joined). Pending invitations can be
+  cancelled. Joining takes a membership.
+- **Moving drawings**: a drawing's ⋯ menu on your drawings page moves it into a workspace you can edit
+  in, or takes it out again. Admins can take any drawing out, which leaves it with the person who made
+  it. A drawing's owner stays its owner wherever it is (only they delete it or share it on its own).
+- Role changes and removals reach open drawings at once: someone removed sees "You no longer have
+  access", someone made an editor can draw straight away.
+- Anyone can **leave** a workspace except its owner, who can **delete** it instead: its drawings
+  aren't deleted but go back to the people who made them.
+- People who aren't in a workspace get the same "not open to you" page whether or not it exists, and
+  only owners and admins see members' email addresses.
+
+How it works: `workspaces`, `workspace_members` (one owner) and `workspace_invites` (only a SHA-256 of
+each emailed token is kept) in Postgres, and `drawings.workspace_id`. A drawing's role is the best of
+owning it, being invited to it, and being in its workspace (`getRole` in `src/lib/collab/access.ts`;
+the write path and pictures check the same). Changes are Server Actions in
+`src/app/workspace-actions.ts`, each checking the session, the membership and the role; the rules
+for who may change whom are in `src/lib/workspaces/roles.ts`.
+
 ## Live collaboration
 
 Open **Share** in a drawing and turn on **Invite with a link**. Anyone with a membership who opens the
@@ -968,6 +1075,7 @@ settings sections.
 | L / A | Line / arrow | Arrows (+Shift) | Nudge |
 | R / O | Rectangle / ellipse | Ctrl/⌘ + / − / 0 | Zoom in / out / 100 % |
 | M | Equation | G | Graph |
+| U | Trace a picture into strokes | F | Frame (a slide); Alt+drag moves a frame alone |
 | K | To-do board | Shift + corner drag | Stretch; widen a to-do board |
 | Shift while drawing | Square, circle, 45° lines | Shift 1 / Shift 2 | Zoom to fit / selection |
 
@@ -999,9 +1107,12 @@ src/
     page.tsx                     gallery: your drawings, shared with you, flashcards due
     drawings/[id]/page.tsx       editor page
     join/[token]/page.tsx        where invite links lead
+    join/workspace/[token]/      where workspace invite links (and emailed invitations) lead
+    workspaces/                  your workspaces, invitations, a new one; [id]/ one workspace's drawings and people
     study/                       flashcard review and card management; actions.ts records answers
     actions.ts                   Server Actions: create, rename, delete (validated with zod)
     sharing-actions.ts           Server Actions: invite link, roles, remove, join, leave
+    workspace-actions.ts         Server Actions for workspaces: make, rename, invite, roles, join, leave, move drawings
     api/drawings/[id]/changes    POST batches of changes (the collaboration write path)
     api/drawings/[id]/events     GET live updates (Server-Sent Events)
     api/health                   GET 200 "ok" when the app can reach its database (for health checks)
@@ -1049,7 +1160,11 @@ src/
     editor/chem-panel.tsx        molar mass, balancer, periodic table
     editor/share-dialog.tsx      invite link, roles, people
     editor/flashcard-dialog.tsx  make a card from the selection
-    gallery/                     overview cards, drawing grids, delete / leave
+    editor/trace-picture-dialog.tsx  Trace a picture: the box, the preview, Detail, Add to canvas
+    editor/slides-panel.tsx      the frames as slides: order, titles, pictures, style, Present
+    editor/presenter.tsx         full-screen slides: keys, swipes, fade / slide / fly
+    gallery/                     overview cards, drawing grids, delete / leave / move between workspaces
+    workspaces/                  new workspace form, invitations, the people panel, the name and its menu
     study/                       review session, card list
     kit/                         the component kit: buttons, fields, menus, dialogs, toasts…
   db/schema.ts                   users (with roles), sessions, email codes, reset links, audit events,
@@ -1066,6 +1181,8 @@ src/
     auth/two-factor.ts           authenticator app codes and recovery codes: set up, check, turn off
     auth/secret-box.ts           AES-256-GCM with ENCRYPTION_KEY, for the two-factor keys
     auth/google.ts               Google OAuth (arctic), linking Google accounts
+    canvas/trace.ts              tracing a picture into strokes: threshold, clean, thin, walk, simplify
+    canvas/present.ts            presenting: slide placement, the fly path, reordering slides
     auth/captcha.ts              Turnstile siteverify (server); captcha-shared.ts for the forms
     auth/rate-limit.ts           the rate limits: token buckets and the per-account login throttle
     rate-limit/buckets.ts        how they work, in Redis (Lua) or in memory
@@ -1162,10 +1279,17 @@ stops when the system asks for reduced motion.
 `subscriptions`: `id` (Stripe's `sub_...`, or `comp_...`), `user_id` (cascade delete), `customer_id`,
 `status`, `price_id`, `current_period_end`, `cancel_at` (set once cancelled), `ended_at`. See
 [Memberships](#memberships).
-`drawings`: `id`, `user_id` (the owner), `title`, `data` (jsonb), `thumbnail`, `version` (bumped by
-every applied change), `share_token` (the invite link's secret, null when off), `share_role`,
-`created_at`, `updated_at`.
+`drawings`: `id`, `user_id` (the owner), `title`, `data` (jsonb), `presentation` (jsonb: `style`,
+`stage`, `numbers`; null until set, see [Frames and presenting](#frames-and-presenting)), `thumbnail`,
+`version` (bumped by every applied change), `share_token` (the invite link's secret, null when off),
+`share_role`, `created_at`, `updated_at`.
 `drawing_members`: `drawing_id`, `user_id`, `role` (`editor` or `viewer`), `created_at`.
+
+`workspaces`: `id`, `name`, `invite_token` (the invite link's secret, null when off), `invite_role`,
+`created_at`, `updated_at`. `workspace_members`: `workspace_id`, `user_id`, `role` (`owner`, `admin`,
+`editor` or `viewer`), `created_at`. `workspace_invites`: `id`, `workspace_id`, `email` (lowercased),
+`role`, `token_hash` (SHA-256), `invited_by`, `created_at`, `expires_at`. `drawings.workspace_id` is
+the workspace a drawing is in (null for your own; set back to null when the workspace is deleted).
 `drawing_changes`: `drawing_id`, `version`, `batch_id` (unique per drawing), `client_id`, `user_id`,
 `ops` (jsonb); the recent history editors catch up from, pruned to about 2,000 rows per drawing.
 `assets`: `id` (generated in the browser), `drawing_id` (cascade delete), `mime_type`, `bytes`
@@ -1200,6 +1324,7 @@ Progress and bamboo are worked out from these when asked; the level is also kept
   { type: "math", syntax: "tex" | "chem", source, color, x, y, size, w, h },
   { type: "graph", x, y, w, h, fns: [{ expr, color }], xMin, xMax, yMin, yMax, grid },
   { type: "kanban", x, y, w, scale, title, columns: [{ id, title, color, cards: [{ id, text }] }] },
+  { type: "frame", x, y, w, h, title, order },                       // a slide
 ] }
 ```
 
@@ -1339,6 +1464,27 @@ Google, it checks the client secret, the redirect URI and the PKCE verifier. `GO
   edits restored in a new tab.
 - `e2e/test-quota.mjs` (17 checks): squeezes the site's quota through the Chrome DevTools Protocol and
   walks the whole fallback chain, including pasting an image when nothing fits locally.
+- `e2e/test-trace.mjs` (28 checks): Trace a picture with a shaded, grainy photo of a fraction and a
+  square root and with a blackboard of chalk chemistry: the U key and button, the box starting around
+  the writing, resizing it by an edge, moving and resizing it with the keyboard, drawing a new one,
+  Whole picture, the count and preview following it in the pen colour, the dark-background switch
+  (detected, and overridden), Detail, Add to canvas (every stroke, selected, saved as marker strokes in
+  the pen colour, the writing's shape), one undo, Cancel, a file that isn't a picture, and a phone.
+- `e2e/test-workspaces.mjs` (51 checks): team workspaces with four people: making one (a name
+  needed), a drawing made in it and the share dialog saying so, the invite link (members only), an
+  emailed invitation (its link, only a hash stored, the in-app list, someone else's account, a
+  cancelled one), editors drawing and viewers refused by the server, role changes and removal
+  reaching open drawings live, what admins may and may not change, the not-open-to-you page, moving
+  drawings in and out, renaming, leaving, and deleting it giving drawings back to their makers.
+- `e2e/test-frames.mjs` (55 checks): frames and presenting. The Frame tool (F) in 16:9 and square, a
+  click for a view-sized frame, New slide around a selection; moving a frame by its title takes what's
+  wholly inside (Alt: the frame alone), clicks inside reach what's drawn there, the eraser leaves frames;
+  the Slides panel (pictures, rename, reorder, delete, double-clicking a title); the style, stage and
+  numbers saved, sent live to another tab and kept after reloading; presenting (a dark stage, the
+  slide on the drawing's background, no frame outlines, keys, numbers once the controls tuck away, the
+  end, keys kept from the board, Esc back to that slide), a fly showing the canvas mid-flight, reduced
+  motion, undo, a view-only member presenting but not editing, and a phone (the menu, a swipe, a tap
+  for the controls).
 - `e2e/test-input.mjs` (6 checks): real pen pressure, two-finger pinch zoom, and opening a version 1
   drawing.
 - `e2e/test-collab.mjs` (40 checks): three people in three browsers. Invite links (members
@@ -1439,8 +1585,12 @@ through its gap checked every step of the way, no way through a wall without one
 spot, pen strokes cut into pieces so a drawn circle's middle is clear, erasers ignored), the seasonal
 themes' dates (Easter Sundays from 2024 to 2285, and each theme's first and last day), the admin
 dashboard's address handling and five-page window, the settings' parsing, profile picture URLs and type
-sniffing, and the drawing and to-do board effects (what replays, what waits, ghosts, glides from a
-drop, a moved board's cards not lagging), without a browser.
+sniffing, the drawing and to-do board effects (what replays, what waits, ghosts, glides from a
+drop, a moved board's cards not lagging), and picture tracing (a bar, a ring, a plus sign, a dot under
+a line, grain, shade across a photo, a blackboard, finding the writing), and frames as slides (their
+order, what a frame carries, edge-only hits, renumbering, where a slide sits on the screen, the fly
+path's ends, pull-back and length, stored styles), and who may do what in a workspace, without a
+browser.
 
 Each suite signs up its own account first (with a complimentary membership, except where the
 membership is what's being tested). They need Chrome (`CHROME_PATH` if it isn't

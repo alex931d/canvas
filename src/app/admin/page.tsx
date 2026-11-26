@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, GalleryVerticalEnd, LayoutGrid, PawPrint, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ArrowRight, GalleryVerticalEnd, LayoutGrid, PawPrint, ShieldCheck, UsersRound } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -91,6 +91,7 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/admin">["
     <div className="flex min-h-dvh flex-col md:flex-row">
       <AppSidebar footer={<SidebarUserMenu user={actor} />}>
         <SidebarLink href="/" icon={<LayoutGrid />} label="Drawings" />
+        <SidebarLink href="/workspaces" icon={<UsersRound />} label="Workspaces" />
         <SidebarLink href="/study" icon={<GalleryVerticalEnd />} label="Study" />
         <SidebarLink href="/buddies" icon={<PawPrint />} label="Buddies" />
         <SidebarLink href="/admin" icon={<ShieldCheck />} label="Admin" active />

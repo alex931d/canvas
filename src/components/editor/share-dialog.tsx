@@ -1,6 +1,7 @@
 "use client";
 
-import { Check, ChevronDown, Copy, Link2, LoaderCircle, RefreshCw, Users } from "lucide-react";
+import { Check, ChevronDown, Copy, Link2, LoaderCircle, RefreshCw, Users, UsersRound } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 import {
   Avatar,
@@ -107,6 +108,19 @@ export function ShareDialog({
         {error ? (
           <p role="alert" className="rounded-lg bg-red/10 px-3 py-2 text-sm text-red">
             {error}
+          </p>
+        ) : null}
+
+        {state?.workspace ? (
+          <p className="flex items-start gap-2 rounded-lg bg-green/10 px-3 py-2 text-sm" data-testid="share-workspace">
+            <UsersRound className="mt-0.5 size-4 shrink-0 text-green" />
+            <span>
+              It&apos;s in the workspace{" "}
+              <Link href={`/workspaces/${state.workspace.id}`} className="font-bold underline-offset-4 hover:underline">
+                {state.workspace.name}
+              </Link>
+              : everyone there can open it too.
+            </span>
           </p>
         ) : null}
 

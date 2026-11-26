@@ -2,12 +2,16 @@
 // parser, molar masses and the balancer, the graph expression parser, the
 // collaboration document model (two simulated tabs and a fake server),
 // to-do board layout and card moves, byte ranges for video, the schemas,
-// the study buddies' levels, streaks and lines, and the seasonal themes' dates.
+// the study buddies' levels, streaks and lines, the seasonal themes' dates,
+// tracing pictures into strokes, frames as slides (order, what a frame
+// carries, the journey's camera path), and who may do what in a team workspace.
 //   npm run test:unit
 import { balanceEquation } from "../src/lib/chem/balance";
 import { ELEMENTS } from "../src/lib/chem/elements";
 import { molarMass, parseSpecies, speciesToMhchem, speciesToText } from "../src/lib/chem/formula";
-import { elementBox, scaleElement } from "../src/lib/canvas/geometry";
+import { elementBox, hitTest, insideFrame, scaleElement, slidesOf } from "../src/lib/canvas/geometry";
+import { cameraFor, flight, journeyVeil, reorderSlides, slideRect } from "../src/lib/canvas/present";
+import { assignableRoles, canManageMember, drawingRoleFrom } from "../src/lib/workspaces/roles";
 import {
   addColumn,
   dropSlot,
@@ -22,7 +26,15 @@ import {
   removeColumn,
   wrapText,
 } from "../src/lib/canvas/kanban";
-import { assetIdsOf, elementSchema, type CanvasElement, type KanbanElement } from "../src/lib/canvas/schema";
+import {
+  assetIdsOf,
+  DEFAULT_PRESENTATION,
+  elementSchema,
+  normalizePresentation,
+  type CanvasElement,
+  type FrameElement,
+  type KanbanElement,
+} from "../src/lib/canvas/schema";
 import { parseRange } from "../src/lib/http/range";
 import { buildGrid, clearLine, edgeSpots, findPath, freeSpots, isFree, nearestFree, obstaclesOf, pathClear, touchesDrawing } from "../src/lib/buddy/pathing";
 import { afterReview, levelUp } from "../src/lib/buddy/lines";
@@ -39,6 +51,7 @@ import { act, BattleError, catchChance, makeFighter, ratesOf, startBattle, viewO
 import { ABILITY_POOL, bambooFor, DEFAULT_KINDS, pickRarity, raritiesAt, rollWild, starterAbility } from "../src/lib/buddy/kinds";
 import { apartText, DEFAULT_RULES, firstLevel, openingsOf, rulesFrom, rulesFromForm, sharesAt } from "../src/lib/buddy/rules";
 import { avatarUrl, sniffImageType } from "../src/lib/profile/avatar";
+import { findInk, simplify, traceStrokes, type Pixels } from "../src/lib/canvas/trace";
 
 let fails = 0;
 const eq = (label: string, got: unknown, want: unknown) => {
@@ -690,6 +703,176 @@ eq(
   eq("a pen stroke becomes many small pieces", pieces.length > 15 && pieces.every((p) => p.w < 80 && p.h < 80), true);
   eq("…so the middle of a drawn circle is clear", touchesDrawing({ x: 700, y: 380 }, body, pieces), false);
   eq("erasers aren't obstacles", obstaclesOf([{ id: crypto.randomUUID(), type: "eraser", size: 20, points: [0, 0, 500, 500] }]).length, 0);
+}
+
+// ------------------------------------------------------------ tracing pictures into strokes
+{
+  /** A white picture with ink painted by `paint(x, y)` (true = ink), optionally light-on-dark and grainy. */
+  const picture = (w: number, h: number, paint: (x: number, y: number) => boolean, { dark = false, noise = 0, seed = 7 } = {}): Pixels => {
+    const data = new Uint8ClampedArray(w * h * 4);
+    let r = seed;
+    const rand = () => (r = (r * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let v = paint(x, y) ? (dark ? 235 : 30) : dark ? 40 : 245;
+        v += (rand() - 0.5) * noise;
+        data.set([v, v, v, 255], (y * w + x) * 4);
+      }
+    }
+    return { width: w, height: h, data };
+  };
+  const nearSegment = (x: number, y: number, ax: number, ay: number, bx: number, by: number, r: number) => {
+    const dx = bx - ax, dy = by - ay;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)));
+    return Math.hypot(x - ax - t * dx, y - ay - t * dy) <= r;
+  };
+  const span = (pts: number[], axis: 0 | 1) => {
+    const v = pts.filter((_, k) => k % 2 === axis);
+    return Math.max(...v) - Math.min(...v);
+  };
+  const barPic = () => picture(200, 60, (x, y) => x >= 20 && x < 180 && y >= 26 && y < 34);
+
+  const bar = traceStrokes(barPic());
+  eq("a bar becomes one straight stroke along its middle", [bar.strokes.length, bar.strokes[0]?.points.length], [1, 4]);
+  eq(
+    "…as long as the bar, as wide as its ink",
+    [span(bar.strokes[0].points, 0) >= 150, Math.abs(bar.strokes[0].points[1] - 30) <= 1, bar.thickness >= 6 && bar.thickness <= 9],
+    [true, true, true],
+  );
+
+  const ring = traceStrokes(picture(120, 120, (x, y) => Math.abs(Math.hypot(x - 60, y - 60) - 40) <= 3));
+  const loop = ring.strokes[0]?.points ?? [];
+  eq(
+    "a ring becomes one closed loop",
+    [ring.strokes.length, Math.hypot(loop[0] - loop[loop.length - 2], loop[1] - loop[loop.length - 1]) < 2, Math.round(span(loop, 0) / 10)],
+    [1, true, 8],
+  );
+
+  const plus = traceStrokes(picture(100, 100, (x, y) => nearSegment(x, y, 20, 50, 80, 50, 3) || nearSegment(x, y, 50, 20, 50, 80, 3)));
+  eq(
+    "a plus sign: four arms from its middle, no stubs",
+    [plus.strokes.filter((s) => s.points.length >= 4).length, plus.strokes.every((s) => span(s.points, 0) + span(s.points, 1) >= 20)],
+    [4, true],
+  );
+
+  const dots = traceStrokes(picture(160, 60, (x, y) => (x >= 20 && x < 140 && y >= 18 && y < 24) || Math.hypot(x - 80, y - 42) <= 5));
+  const dot = dots.strokes.find((s) => span(s.points, 0) + span(s.points, 1) < 4);
+  eq("a dot under a line stays a dot, as big as it is", [dots.strokes.length, !!dot, (dot?.size ?? 0) >= 7], [2, true, true]);
+
+  const grainy = traceStrokes(
+    picture(200, 80, (x, y) => (x >= 20 && x < 180 && y >= 36 && y < 44) || (x * 7 + y * 13) % 97 === 0, { noise: 30 }),
+  );
+  eq("specks and grain don't become strokes", grainy.strokes.length, 1);
+
+  const board = traceStrokes(picture(200, 60, (x, y) => x >= 20 && x < 180 && y >= 26 && y < 34, { dark: true, noise: 20 }));
+  eq("light writing on a dark background is read the right way round", [board.darkBackground, board.strokes.length], [true, 1]);
+  eq(
+    "…unless told otherwise",
+    traceStrokes(picture(200, 60, (x, y) => x >= 20 && x < 180 && y >= 26 && y < 34, { dark: true }), { darkBackground: false }).darkBackground,
+    false,
+  );
+
+  // Shade across a photo: the paper goes from bright to dim; only the line is ink.
+  const shaded = barPic();
+  for (let i = 0; i < shaded.data.length; i += 4) {
+    const f = 1 - (((i / 4) % 200) / 200) * 0.55;
+    for (let c = 0; c < 3; c++) shaded.data[i + c] *= f;
+  }
+  eq("shade across a photo doesn't turn into ink", traceStrokes(shaded).strokes.length, 1);
+
+  eq("an empty picture gives no strokes", traceStrokes(picture(80, 40, () => false)).strokes.length, 0);
+  eq("findInk boxes the writing", findInk(picture(200, 100, (x, y) => x >= 50 && x < 150 && y >= 40 && y < 60)), { x: 50, y: 40, w: 100, h: 20 });
+  eq(
+    "…leaving out a page edge cut off at the border",
+    findInk(picture(200, 100, (x, y) => (x >= 50 && x < 150 && y >= 40 && y < 60) || x < 4)),
+    { x: 50, y: 40, w: 100, h: 20 },
+  );
+  eq("simplify keeps corners and drops the points in between", simplify([0, 0, 1, 0.1, 2, 0, 3, 0, 3, 1, 3, 2], 0.5), [0, 0, 3, 0, 3, 2]);
+  eq(
+    "traced strokes fit the stroke schema",
+    elementSchema.safeParse({ id: "t", type: "stroke", color: "#201f24", size: bar.strokes[0].size, brush: "marker", points: bar.strokes[0].points })
+      .success,
+    true,
+  );
+}
+
+
+// ------------------------------------------------------------ frames and slides
+{
+  const frame = (id: string, x: number, y: number, w: number, h: number, order: number): FrameElement => ({
+    id,
+    type: "frame",
+    x,
+    y,
+    w,
+    h,
+    title: `Slide ${id}`,
+    order,
+  });
+  const a = frame("a", 0, 0, 1600, 900, 2);
+  const b = frame("b", 2000, 0, 1600, 900, 1);
+  const c = frame("c", 0, 1200, 800, 600, 2);
+  eq("slides go by order, then top to bottom", slidesOf([a, b, c]).map((f) => f.id), ["b", "a", "c"]);
+  eq("frames fit the schema", elementSchema.safeParse(a).success, true);
+  eq("a frame needs a title", elementSchema.safeParse({ ...a, title: " " }).success, false);
+  const ink: CanvasElement = { id: "s", type: "stroke", color: "#000", size: 4, points: [100, 100, 300, 200] };
+  const half: CanvasElement = { id: "r", type: "rect", color: "#000", size: 2, fill: null, x: 1500, y: 100, w: 300, h: 100 };
+  eq("a frame carries only what's wholly inside it", insideFrame([a, ink, half, b], a).map((e) => e.id), ["s"]);
+  eq("frames are hit on their edge", hitTest(a, { x: 0, y: 450 }, 4), true);
+  eq("not in the middle, so what's drawn inside stays clickable", hitTest(a, { x: 800, y: 450 }, 4), false);
+  eq("moving slide 3 to the front renumbers 1, 2, 3", reorderSlides(slidesOf([a, b, c]), 2, 0).map((f) => [f.id, f.order]), [
+    ["c", 1],
+    ["b", 2],
+    ["a", 3],
+  ]);
+  eq("moving to where it already is changes nothing", reorderSlides([{ ...b, order: 1 }, { ...a, order: 2 }], 1, 1), []);
+  const screen = { w: 1280, h: 800 };
+  const r = slideRect(elementBox(a), screen, 20);
+  eq("a 16:9 slide fills the width of a 16:10 screen, centred", [Math.round(r.x), Math.round(r.y), Math.round(r.w), Math.round(r.h)], [
+    20,
+    51,
+    1240,
+    698,
+  ]);
+  const from = cameraFor(elementBox(a), screen);
+  const to = cameraFor(elementBox(b), screen);
+  const fly = flight(from, to, screen);
+  eq("the journey starts on the first frame", fly.at(0), from);
+  eq("and ends on the next", fly.at(1), to);
+  const mid = fly.at(0.5);
+  eq("halfway, it's between them", mid.cx > from.cx && mid.cx < to.cx, true);
+  eq("pulled back to show both", mid.scale < Math.min(from.scale, to.scale), true);
+  eq("far frames take longer, within bounds", fly.duration >= 650 && fly.duration <= 1800, true);
+  const zoomOnly = flight(from, { ...from, scale: from.scale * 4 }, screen);
+  eq("zooming in place stays put", Math.round(zoomOnly.at(0.5).cx), Math.round(from.cx));
+  near("the stage covers the canvas when resting", journeyVeil(0), 1);
+  near("…and again on arrival", journeyVeil(1), 1);
+  eq("and mostly lifts mid-flight", journeyVeil(0.5) < 0.2, true);
+  eq("a stored style that isn't known falls back", normalizePresentation({ style: "spin" }), DEFAULT_PRESENTATION);
+  eq("a stored style is kept", normalizePresentation({ style: "journey", stage: "paper", numbers: false }), {
+    style: "journey",
+    stage: "paper",
+    numbers: false,
+  });
+}
+
+// ------------------------------------------------------------ workspace roles
+{
+  eq("owners, admins and editors edit a workspace's drawings", ["owner", "admin", "editor"].map((r) => drawingRoleFrom(r as "owner")), [
+    "editor",
+    "editor",
+    "editor",
+  ]);
+  eq("viewers view them", drawingRoleFrom("viewer"), "viewer");
+  eq("and outsiders get nothing", drawingRoleFrom(null), null);
+  eq("owners can make admins", assignableRoles("owner"), ["admin", "editor", "viewer"]);
+  eq("admins can't", assignableRoles("admin"), ["editor", "viewer"]);
+  eq("editors give no roles", assignableRoles("editor"), []);
+  eq("owners manage admins", canManageMember("owner", "admin"), true);
+  eq("admins manage editors and viewers", [canManageMember("admin", "editor"), canManageMember("admin", "viewer")], [true, true]);
+  eq("but not other admins, or the owner", [canManageMember("admin", "admin"), canManageMember("admin", "owner")], [false, false]);
+  eq("editors manage nobody, not even viewers", canManageMember("editor", "viewer"), false);
+  eq("nobody manages the owner", canManageMember("owner", "owner"), false);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

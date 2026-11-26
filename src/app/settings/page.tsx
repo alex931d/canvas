@@ -1,4 +1,4 @@
-import { GalleryVerticalEnd, LayoutGrid, PawPrint } from "lucide-react";
+import { GalleryVerticalEnd, LayoutGrid, PawPrint, UsersRound } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
@@ -44,6 +44,7 @@ export default function SettingsPage({ searchParams }: PageProps<"/settings">) {
         }
       >
         <SidebarLink href="/" icon={<LayoutGrid />} label="Drawings" />
+        <SidebarLink href="/workspaces" icon={<UsersRound />} label="Workspaces" />
         <SidebarLink href="/study" icon={<GalleryVerticalEnd />} label="Study" />
         <SidebarLink href="/buddies" icon={<PawPrint />} label="Buddies" />
         <Suspense fallback={null}>

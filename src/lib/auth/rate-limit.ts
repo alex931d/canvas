@@ -92,6 +92,10 @@ function makeLimiters() {
     battleByUser: bucket("battleByUser", 120, 0.5),
     /** Name and profile picture changes: 20, then one every 15 s, per user. */
     profileByUser: bucket("profileByUser", 20, 15),
+    /** Workspace invitations emailed: 20, then one every 30 s, per user, so nobody's inbox gets flooded. */
+    invitesByUser: bucket("invitesByUser", 20, 30),
+    /** Workspace changes (made, renamed, people, links): 60, then one a second, per user. */
+    workspacesByUser: bucket("workspacesByUser", 60, 1),
     /** Settings page choices saved: 60, then one a second, per user. */
     preferencesByUser: bucket("preferencesByUser", 60, 1),
   };

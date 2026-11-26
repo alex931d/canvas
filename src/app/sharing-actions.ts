@@ -5,7 +5,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/db";
-import { drawingMembers, drawings, users, type MemberRole } from "@/db/schema";
+import { drawingMembers, drawings, users, workspaces, type MemberRole } from "@/db/schema";
 import { getCurrentSession, requireUser } from "@/lib/auth/session";
 import { getMembership } from "@/lib/billing/membership";
 import { avatarUrl } from "@/lib/profile/avatar";
@@ -28,7 +28,7 @@ export type ShareMember = {
   avatarUrl: string | null;
 };
 
-export type SharingState =
+export type SharingState = (
   | {
       role: "owner";
       link: { token: string | null; role: MemberRole };
@@ -40,7 +40,11 @@ export type SharingState =
       ownerName: string | null;
       ownerAvatarUrl: string | null;
       members: ShareMember[];
-    };
+    }
+) & {
+  /** The team workspace it's in: everyone there can open it too. */
+  workspace: { id: string; name: string } | null;
+};
 
 export type SharingResult = { ok: true; state: SharingState } | { ok: false; error: string };
 
@@ -70,9 +74,12 @@ async function loadState(drawingId: string, userId: string): Promise<SharingStat
       ownerId: drawings.userId,
       ownerName: users.name,
       ownerAvatarUpdatedAt: users.avatarUpdatedAt,
+      workspaceId: drawings.workspaceId,
+      workspaceName: workspaces.name,
     })
     .from(drawings)
     .leftJoin(users, eq(users.id, drawings.userId))
+    .leftJoin(workspaces, eq(workspaces.id, drawings.workspaceId))
     .where(eq(drawings.id, drawingId));
   if (!drawing) return null;
   const rows = await db
@@ -90,8 +97,9 @@ async function loadState(drawingId: string, userId: string): Promise<SharingStat
     .then((list) =>
       list.map(({ avatarUpdatedAt, ...m }) => ({ ...m, avatarUrl: avatarUrl(m.userId, avatarUpdatedAt) })),
     );
+  const workspace = drawing.workspaceId ? { id: drawing.workspaceId, name: drawing.workspaceName ?? "a workspace" } : null;
   if (role === "owner") {
-    return { role, link: { token: drawing.shareToken, role: drawing.shareRole }, members: rows };
+    return { role, link: { token: drawing.shareToken, role: drawing.shareRole }, members: rows, workspace };
   }
   // Collaborators see who else is there, but not their email addresses.
   return {
@@ -100,6 +108,7 @@ async function loadState(drawingId: string, userId: string): Promise<SharingStat
     ownerName: drawing.ownerName,
     ownerAvatarUrl: drawing.ownerId ? avatarUrl(drawing.ownerId, drawing.ownerAvatarUpdatedAt) : null,
     members: rows.map((m) => ({ ...m, email: null })),
+    workspace,
   };
 }
 

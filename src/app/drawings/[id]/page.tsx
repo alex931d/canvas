@@ -37,6 +37,7 @@ async function Editor({ params }: { params: PageProps<"/drawings/[id]">["params"
       ownerName={drawing.ownerName}
       initialTitle={drawing.title}
       initialData={drawing.data}
+      initialPresentation={drawing.presentation}
       initialVersion={drawing.version}
       serverUpdatedAt={drawing.updatedAt.toISOString()}
     />

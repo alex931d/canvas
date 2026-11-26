@@ -189,6 +189,41 @@ export const kanbanElementSchema = z.object({
   columns: z.array(kanbanColumnSchema).min(1).max(6),
 });
 
+/**
+ * A part of the canvas marked as a slide: presenting shows each frame in
+ * turn, filling the screen (src/components/editor/presenter.tsx). Frames are
+ * drawn behind everything else, and moving one moves what's inside it.
+ */
+export const frameElementSchema = z.object({
+  id,
+  type: z.literal("frame"),
+  x: coord,
+  y: coord,
+  w: z.number().min(1).max(1e6),
+  h: z.number().min(1).max(1e6),
+  title: z.string().trim().min(1).max(80),
+  /** Slide order, lowest first. Reordering gives one frame a number between two others. */
+  order: z.number().finite(),
+});
+
+/** How a drawing's frames are presented (drawings.presentation; set in the Slides panel). */
+export const presentationSchema = z.object({
+  /** fade: one slide fades into the next; swipe: slides slide in from the side; journey: the camera flies across the canvas. */
+  style: z.enum(["fade", "swipe", "journey"]),
+  /** What's around a slide that doesn't fill the screen: dark, or the drawing's own background. */
+  stage: z.enum(["dark", "paper"]),
+  /** Show "3 / 12" in the corner. */
+  numbers: z.boolean(),
+});
+export type Presentation = z.infer<typeof presentationSchema>;
+export const DEFAULT_PRESENTATION: Presentation = { style: "fade", stage: "dark", numbers: true };
+
+/** A stored presentation setting, or the defaults (unknown styles from newer versions fall back too). */
+export function normalizePresentation(raw: unknown): Presentation {
+  const parsed = presentationSchema.safeParse(raw);
+  return parsed.success ? parsed.data : DEFAULT_PRESENTATION;
+}
+
 export const elementSchema = z.discriminatedUnion("type", [
   strokeElementSchema,
   eraserElementSchema,
@@ -202,6 +237,7 @@ export const elementSchema = z.discriminatedUnion("type", [
   mathElementSchema,
   graphElementSchema,
   kanbanElementSchema,
+  frameElementSchema,
 ]);
 
 export const drawingDataSchema = z.object({
@@ -240,6 +276,7 @@ export type AssetElement = ImageElement | GifElement | VideoElement;
 export type KanbanCard = z.infer<typeof kanbanCardSchema>;
 export type KanbanColumn = z.infer<typeof kanbanColumnSchema>;
 export type KanbanElement = z.infer<typeof kanbanElementSchema>;
+export type FrameElement = z.infer<typeof frameElementSchema>;
 export type ShapeElement = RectElement | EllipseElement;
 export type DrawingData = z.infer<typeof drawingDataSchema>;
 

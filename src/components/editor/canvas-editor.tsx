@@ -10,6 +10,7 @@ import {
   FileUp,
   FlaskConical,
   ImagePlus,
+  Presentation as PresentationIcon,
   Redo2,
   Share2,
   Sparkles,
@@ -18,8 +19,17 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useEffectEvent, useReducer, useRef, useState, useSyncExternalStore } from "react";
-import { renameDrawing } from "@/app/actions";
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { renameDrawing, savePresentation } from "@/app/actions";
 import { AppSidebar, SidebarButton, SidebarSeparator } from "@/components/app-sidebar";
 import { StudyBuddies } from "@/components/buddy/study-buddies";
 import { Badge, Button, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Tip, toast } from "@/components/kit";
@@ -27,9 +37,18 @@ import { SidebarUserMenu, type MenuUser } from "@/components/user-menu";
 import { emitBuddy } from "@/lib/buddy/events";
 import { finishedCards } from "@/lib/canvas/kanban";
 import { mathCheckSchema, type MathCheck } from "@/lib/ai/math-check-schema";
+import { slidesOf } from "@/lib/canvas/geometry";
 import { AssetCache, inspectGif } from "@/lib/canvas/images";
+import { reorderSlides } from "@/lib/canvas/present";
 import { exportRegion, makeThumbnail, renderRegion, type RenderEnv } from "@/lib/canvas/render";
-import { assetIdsOf, drawingDataSchema, isAssetElement, type DrawingData } from "@/lib/canvas/schema";
+import {
+  assetIdsOf,
+  drawingDataSchema,
+  isAssetElement,
+  type DrawingData,
+  type FrameElement,
+  type Presentation,
+} from "@/lib/canvas/schema";
 import type { Role } from "@/lib/collab/access-types";
 import { CollabDoc, type HistoryAction } from "@/lib/collab/doc";
 import { peerColor, type Peer } from "@/lib/collab/peers";
@@ -41,10 +60,13 @@ import { Board, type BoardHandle, type FlashcardCapture } from "./board";
 import { ChemPanel } from "./chem-panel";
 import { FlashcardDialog } from "./flashcard-dialog";
 import { PeerAvatars } from "./peer-avatars";
+import { Presenter } from "./presenter";
 import { ShareDialog } from "./share-dialog";
+import { SlidesPanel } from "./slides-panel";
 import { StoragePopover, type ServerState } from "./storage-panel";
 import { StyleBar } from "./style-bar";
-import { DEFAULT_STYLE, IMAGE_ACTION, MEDIA_ACCEPT, TOOLS, VIEW_TOOLS, type Style, type Tool } from "./tools";
+import { DEFAULT_STYLE, IMAGE_ACTION, MEDIA_ACCEPT, TOOLS, TRACE_ACTION, VIEW_TOOLS, type Style, type Tool } from "./tools";
+import { TracePictureDialog } from "./trace-picture-dialog";
 
 function fileSafe(name: string) {
   return (
@@ -102,6 +124,7 @@ export function CanvasEditor({
   ownerName,
   initialTitle,
   initialData,
+  initialPresentation,
   initialVersion,
   serverUpdatedAt,
   preferences = DEFAULT_PREFERENCES,
@@ -112,6 +135,8 @@ export function CanvasEditor({
   ownerName: string | null;
   initialTitle: string;
   initialData: DrawingData;
+  /** How the frames are presented (Slides panel). */
+  initialPresentation: Presentation;
   initialVersion: number;
   serverUpdatedAt: string;
   /** Drawing and to-do board effects, from the settings page. */
@@ -167,12 +192,30 @@ export function CanvasEditor({
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
   const selectionRef = useRef<string[]>([]);
   const [panelMessage, setPanelMessage] = useState<string | null>(null);
-  const [chemOpen, setChemOpen] = useState(false);
+  const [chemOpen, setChemOpenState] = useState(false);
+  const [slidesOpen, setSlidesOpenState] = useState(false);
+  /** A frame to show in the slides panel (its title was double-clicked). */
+  const [slideFocus, setSlideFocus] = useState<string | null>(null);
+  const [presentation, setPresentation] = useState<Presentation>(initialPresentation);
+  const [presenting, setPresenting] = useState<{ startId: string | null } | null>(null);
+  // One side panel at a time: they open in the same place.
+  const setChemOpen = (open: boolean) => {
+    setChemOpenState(open);
+    if (open) setSlidesOpenState(false);
+  };
+  const setSlidesOpen = (open: boolean) => {
+    setSlidesOpenState(open);
+    if (open) setChemOpenState(false);
+    else setSlideFocus(null);
+  };
   const [shareOpen, setShareOpen] = useState(false);
   const [flashcard, setFlashcard] = useState<FlashcardCapture | null>(null);
 
   const boardRef = useRef<BoardHandle>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const traceInputRef = useRef<HTMLInputElement>(null);
+  const [traceFile, setTraceFile] = useState<File | null>(null);
+  const closeTrace = useCallback(() => setTraceFile(null), []);
   const backupInputRef = useRef<HTMLInputElement>(null);
 
   const localMode = localStatus?.mode ?? "indexeddb";
@@ -188,10 +231,14 @@ export function CanvasEditor({
             ? "waiting"
             : "synced";
 
-  const env: RenderEnv = {
-    getImage: (assetId) => images?.get(assetId) ?? null,
-    getMedia: (el) => images?.media(el) ?? null,
-  };
+  const env: RenderEnv = useMemo(
+    () => ({
+      getImage: (assetId) => images?.get(assetId) ?? null,
+      getMedia: (el) => images?.media(el) ?? null,
+    }),
+    [images],
+  );
+  const slides = useMemo(() => slidesOf(elements), [elements]);
 
   useEffect(() => {
     readOnlyRef.current = readOnly;
@@ -275,6 +322,7 @@ export function CanvasEditor({
             status: setSyncStatus,
             presence: onPresence,
             title: onSyncTitle,
+            presentation: setPresentation,
             role: onRole,
             revoked: () => setEnded("revoked"),
             deleted: () => setEnded("deleted"),
@@ -425,6 +473,39 @@ export function CanvasEditor({
     }
   }
 
+  async function changePresentation(next: Presentation) {
+    const before = presentation;
+    setPresentation(next);
+    try {
+      const res = await savePresentation(id, next);
+      if (!res.ok) {
+        setPresentation(before);
+        toast.error(res.error);
+      }
+    } catch {
+      setPresentation(before);
+      toast.error("Couldn't save the slide style: the server is unreachable. Try again when you're back online.");
+    }
+  }
+
+  const updateFrame = (frame: FrameElement, patch: Partial<FrameElement>) =>
+    doc.dispatch({ type: "update", elements: [{ ...frame, ...patch }] });
+
+  /** Show a frame on the board; beside the slides panel on wide screens, instead of it on phones. */
+  function showFrame(frameId: string) {
+    const narrow = window.matchMedia("(max-width: 639px)").matches;
+    if (narrow && slidesOpen) setSlidesOpen(false);
+    const panel = slidesOpen && !narrow ? document.querySelector("[data-testid=slides-panel]") : null;
+    const boardBox = document.querySelector("[data-testid=board]")?.getBoundingClientRect();
+    const covered = panel && boardBox ? Math.max(0, boardBox.right - panel.getBoundingClientRect().left) : 0;
+    boardRef.current?.goToFrame(frameId, covered);
+  }
+
+  function present(startId: string | null) {
+    if (!slides.length) return;
+    setPresenting({ startId });
+  }
+
   function exportPng() {
     const region = exportRegion(elements, 48);
     const scale = Math.min(2, 8000 / Math.max(region.w, region.h));
@@ -571,6 +652,14 @@ export function CanvasEditor({
               shortcut={IMAGE_ACTION.key}
               onClick={() => imageInputRef.current?.click()}
             />
+            <SidebarButton
+              compact
+              icon={<TRACE_ACTION.Icon />}
+              label={TRACE_ACTION.label}
+              shortcut={TRACE_ACTION.key}
+              disabled={!ready}
+              onClick={() => traceInputRef.current?.click()}
+            />
             <SidebarSeparator />
             <SidebarButton
               compact
@@ -683,11 +772,24 @@ export function CanvasEditor({
             </MenuContent>
           </Menu>
 
+          <Tip content="Frames on the canvas as slides: order them, pick a style, present">
+            <Button
+              variant="light"
+              className={cn(BAR_BUTTON, "max-sm:hidden")}
+              onClick={() => setSlidesOpen(!slidesOpen)}
+              aria-label="Slides"
+              aria-pressed={slidesOpen}
+              data-testid="slides-button"
+            >
+              <PresentationIcon /> <span className="max-xl:hidden">Slides</span>
+            </Button>
+          </Tip>
+
           <Tip content="Molar mass, balancing equations and the periodic table">
             <Button
               variant="light"
               className={cn(BAR_BUTTON, "max-sm:hidden")}
-              onClick={() => setChemOpen((o) => !o)}
+              onClick={() => setChemOpen(!chemOpen)}
               aria-label="Chemistry"
               aria-pressed={chemOpen}
             >
@@ -706,7 +808,10 @@ export function CanvasEditor({
               <MenuItem onSelect={() => setShareOpen(true)}>
                 <Share2 /> Share
               </MenuItem>
-              <MenuItem onSelect={() => setChemOpen((o) => !o)}>
+              <MenuItem onSelect={() => setSlidesOpen(!slidesOpen)}>
+                <PresentationIcon /> {slidesOpen ? "Close slides" : "Slides"}
+              </MenuItem>
+              <MenuItem onSelect={() => setChemOpen(!chemOpen)}>
                 <FlaskConical /> {chemOpen ? "Close chemistry" : "Chemistry"}
               </MenuItem>
               <MenuSeparator />
@@ -770,6 +875,12 @@ export function CanvasEditor({
             onPointerWorld={onPointerWorld}
             onSelectionChange={onSelectionChange}
             onMakeFlashcard={setFlashcard}
+            onTracePicture={() => traceInputRef.current?.click()}
+            onOpenFrame={(frameId) => {
+              setSlidesOpen(true);
+              setSlideFocus(frameId);
+            }}
+            onPresentFrame={present}
           />
           {readOnly ? null : <StyleBar tool={tool} style={style} onChange={updateStyle} />}
         </div>
@@ -787,6 +898,58 @@ export function CanvasEditor({
             toast.error("Couldn't load the equation tools. Check your connection and try again.");
           }
         }}
+      />
+
+      <SlidesPanel
+        open={slidesOpen}
+        onOpenChange={setSlidesOpen}
+        slides={slides}
+        elements={elements}
+        background={background}
+        env={env}
+        imageVersion={imageVersion}
+        presentation={presentation}
+        onPresentationChange={(next) => void changePresentation(next)}
+        readOnly={readOnly}
+        focusId={slideFocus}
+        onGoTo={showFrame}
+        onPresent={present}
+        onRename={(frameId, t) => {
+          const frame = slides.find((f) => f.id === frameId);
+          if (frame) updateFrame(frame, { title: t });
+        }}
+        onMove={(from, to) => {
+          const changed = reorderSlides(slides, from, to);
+          if (changed.length) doc.dispatch({ type: "update", elements: changed });
+        }}
+        onDelete={(frameId) => doc.dispatch({ type: "remove", ids: [frameId] })}
+        onNewSlide={() => {
+          const frameId = boardRef.current?.frameSelection();
+          if (frameId) setSlideFocus(frameId);
+        }}
+      />
+
+      {presenting ? (
+        <Presenter
+          elements={elements}
+          background={background}
+          env={env}
+          imageVersion={imageVersion}
+          presentation={presentation}
+          startId={presenting.startId}
+          onClose={(lastId) => {
+            setPresenting(null);
+            if (lastId) showFrame(lastId);
+          }}
+        />
+      ) : null}
+
+      <TracePictureDialog
+        file={traceFile}
+        color={style.color}
+        onClose={closeTrace}
+        onAdd={(picture) => boardRef.current?.insertTraced(picture) ?? 0}
+        onPickAnother={() => traceInputRef.current?.click()}
       />
 
       <FlashcardDialog capture={flashcard} drawingId={id} deck={savedTitle} onClose={() => setFlashcard(null)} />
@@ -809,6 +972,18 @@ export function CanvasEditor({
           const files = [...(e.target.files ?? [])];
           e.target.value = "";
           boardRef.current?.insertFiles(files);
+        }}
+      />
+      <input
+        ref={traceInputRef}
+        type="file"
+        accept="image/*"
+        hidden
+        data-testid="trace-input"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) setTraceFile(file);
         }}
       />
       <input

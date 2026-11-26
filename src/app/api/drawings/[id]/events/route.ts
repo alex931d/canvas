@@ -11,7 +11,7 @@ import { authorizeDrawing, clientIdSchema } from "@/lib/collab/route-auth";
  *
  *   change    {v, b, c, u, ops}  a change, in version order (SSE id = version)
  *   presence  {c, u, n, cur, sel, hello?, bye?}  someone else's cursor
- *   meta      {title}            renamed
+ *   meta      {title?, presentation?}  renamed, or a new presentation style
  *   role      {role}             your access changed (e.g. to view-only)
  *   revoked / deleted            access removed / drawing deleted; stream ends
  *   reset     {v}                too far behind: reload the drawing, reconnect

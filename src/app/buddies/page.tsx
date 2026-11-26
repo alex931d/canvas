@@ -1,4 +1,4 @@
-import { GalleryVerticalEnd, LayoutGrid, PawPrint } from "lucide-react";
+import { GalleryVerticalEnd, LayoutGrid, PawPrint, UsersRound } from "lucide-react";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { StaffSidebarLink } from "@/components/admin/staff-sidebar-link";
@@ -38,6 +38,7 @@ export default function BuddiesPage() {
         }
       >
         <SidebarLink href="/" icon={<LayoutGrid />} label="Drawings" />
+        <SidebarLink href="/workspaces" icon={<UsersRound />} label="Workspaces" />
         <SidebarLink href="/study" icon={<GalleryVerticalEnd />} label="Study" />
         <SidebarLink href="/buddies" icon={<PawPrint />} label="Buddies" active />
         <Suspense fallback={null}>

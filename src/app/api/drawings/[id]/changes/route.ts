@@ -1,7 +1,7 @@
 import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { drawingChanges, drawingMembers, drawings } from "@/db/schema";
+import { drawingChanges, drawingMembers, drawings, workspaceMembers } from "@/db/schema";
 import { limiters } from "@/lib/auth/rate-limit";
 import { recordEvents } from "@/lib/buddy/progress";
 import { finishedCards } from "@/lib/canvas/kanban";
@@ -9,6 +9,7 @@ import { drawingDataSchema, normalizeDrawing } from "@/lib/canvas/schema";
 import { applyOps, batchSchema } from "@/lib/collab/ops";
 import { notify } from "@/lib/collab/notify";
 import { authorizeDrawing, clientIdSchema } from "@/lib/collab/route-auth";
+import { drawingRoleFrom } from "@/lib/workspaces/roles";
 
 /**
  * Apply batches of changes from one browser tab (see src/lib/collab/ops.ts).
@@ -70,7 +71,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/drawings/[i
   try {
     const result = await db.transaction(async (tx) => {
       const [drawing] = await tx
-        .select({ userId: drawings.userId, data: drawings.data, version: drawings.version })
+        .select({ userId: drawings.userId, workspaceId: drawings.workspaceId, data: drawings.data, version: drawings.version })
         .from(drawings)
         .where(eq(drawings.id, id))
         .for("update");
@@ -81,8 +82,18 @@ export async function POST(request: Request, ctx: RouteContext<"/api/drawings/[i
           .select({ role: drawingMembers.role })
           .from(drawingMembers)
           .where(and(eq(drawingMembers.drawingId, id), eq(drawingMembers.userId, user.id)));
-        if (!member) throw new HttpError(404, "Drawing not found.");
-        if (member.role !== "editor") throw new HttpError(403, "You can view this drawing but not change it.");
+        // Or through the drawing's team workspace.
+        const [inWorkspace] = drawing.workspaceId
+          ? await tx
+              .select({ role: workspaceMembers.role })
+              .from(workspaceMembers)
+              .where(and(eq(workspaceMembers.workspaceId, drawing.workspaceId), eq(workspaceMembers.userId, user.id)))
+          : [];
+        const fromWorkspace = drawingRoleFrom(inWorkspace?.role);
+        if (!member && !fromWorkspace) throw new HttpError(404, "Drawing not found.");
+        if (member?.role !== "editor" && fromWorkspace !== "editor") {
+          throw new HttpError(403, "You can view this drawing but not change it.");
+        }
       }
 
       const seen = new Map(

@@ -1,3 +1,4 @@
+import { normalizePresentation, type Presentation } from "@/lib/canvas/schema";
 import type { AssetCache } from "@/lib/canvas/images";
 import type { Role } from "./access-types";
 import type { CollabDoc } from "./doc";
@@ -46,6 +47,8 @@ export type SyncEvents = {
   status: (s: SyncStatus) => void;
   presence: (p: PresenceMessage) => void;
   title: (title: string) => void;
+  /** Someone changed how the frames are presented. */
+  presentation: (presentation: Presentation) => void;
   role: (role: Role) => void;
   /** Lost access (removed, or the drawing is gone). */
   revoked: () => void;
@@ -413,7 +416,8 @@ export class DrawingSync {
         break;
       }
       case "meta":
-        events.title(String(data.title));
+        if (typeof data.title === "string") events.title(data.title);
+        if (data.presentation) events.presentation(normalizePresentation(data.presentation));
         break;
       case "role":
         events.role(data.role as Role);
@@ -443,11 +447,13 @@ export class DrawingSync {
       const json = (await res.json()) as {
         version: number;
         title: string;
+        presentation: unknown;
         role: Role;
         data: { elements: Parameters<CollabDoc["reset"]>[0]["elements"] };
       };
       doc.reset({ elements: json.data.elements, version: json.version });
       events.title(json.title);
+      events.presentation(normalizePresentation(json.presentation));
       events.role(json.role);
     } catch {
       /* the stream retries */

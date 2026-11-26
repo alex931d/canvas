@@ -1,11 +1,13 @@
-import { Eye, Users } from "lucide-react";
+import { Eye, Users, UsersRound } from "lucide-react";
 import Link from "next/link";
 import { LocalTime } from "@/components/local-time";
 import { Skeleton } from "@/components/kit";
-import { Reveal } from "@/components/motion/reveal";
 import { listDrawings, listSharedWithMe } from "@/lib/drawings";
 import { studySummary } from "@/lib/study/cards";
 import { cn } from "@/lib/utils";
+import { listWorkspaces } from "@/lib/workspaces/data";
+import { canEditInWorkspace } from "@/lib/workspaces/roles";
+import { DrawingCard } from "./drawing-card";
 import { DrawingMenu } from "./drawing-menu";
 import { NewDrawingButton } from "./new-drawing-button";
 
@@ -14,7 +16,14 @@ const STAT_NUMBER = "text-2xl leading-none font-bold sm:text-[32px]";
 
 /** Summary cards, your drawings, and drawings shared with you. */
 export async function Overview() {
-  const [drawings, shared, study] = await Promise.all([listDrawings(), listSharedWithMe(), studySummary()]);
+  const [drawings, shared, study, teams] = await Promise.all([
+    listDrawings(),
+    listSharedWithMe(),
+    studySummary(),
+    listWorkspaces(),
+  ]);
+  // Where your drawings can go: workspaces you can add to.
+  const targets = teams.filter((w) => canEditInWorkspace(w.role)).map(({ id, name }) => ({ id, name }));
 
   return (
     <>
@@ -81,12 +90,25 @@ export async function Overview() {
                   </>
                 }
                 chip={
-                  d.members > 0 || d.linkShared ? (
+                  d.workspace ? (
+                    <>
+                      <UsersRound className="size-3.5" />
+                      <span className="max-w-40 truncate">{d.workspace.name}</span>
+                    </>
+                  ) : d.members > 0 || d.linkShared ? (
                     <>
                       <Users className="size-3.5" />
                       {d.members > 0 ? `${d.members} ${d.members === 1 ? "person" : "people"}` : "Link on"}
                     </>
                   ) : null
+                }
+                menu={
+                  <DrawingMenu
+                    id={d.id}
+                    title={d.title}
+                    kind="own"
+                    move={{ current: d.workspace, to: targets, canTakeOut: true }}
+                  />
                 }
               />
             ))}
@@ -109,7 +131,7 @@ export async function Overview() {
                 title={d.title}
                 thumbnail={d.thumbnail}
                 accent="bg-cyan"
-                shared
+                menu={<DrawingMenu id={d.id} title={d.title} kind="shared" />}
                 detail={<>Shared by {d.ownerName ?? "someone"}</>}
                 chip={
                   d.role === "viewer" ? (
@@ -123,55 +145,43 @@ export async function Overview() {
           </ul>
         </section>
       ) : null}
-    </>
-  );
-}
 
-function DrawingCard({
-  index,
-  id,
-  title,
-  thumbnail,
-  detail,
-  chip,
-  accent = "bg-green",
-  shared = false,
-}: {
-  /** Place in the grid: cards in a row come in one after another. */
-  index: number;
-  id: string;
-  title: string;
-  thumbnail: string | null;
-  detail: React.ReactNode;
-  chip: React.ReactNode;
-  accent?: string;
-  shared?: boolean;
-}) {
-  return (
-    <Reveal as="li" delay={(index % 3) * 0.05} className="group relative">
-      <Link href={`/drawings/${id}`} className="block rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <span className="relative block aspect-[16/10] overflow-hidden rounded-lg bg-beige-100 ring-1 ring-black/5 transition-shadow group-hover:ring-2 group-hover:ring-green/50">
-          {thumbnail ? (
-            // Small data URLs stored in Postgres; next/image adds nothing here.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={thumbnail} alt="" className="h-full w-full object-cover" />
-          ) : null}
-          {chip ? (
-            <span className="absolute top-2 left-2 flex items-center gap-1 rounded-full bg-grey-900/85 px-2.5 py-1 text-xs font-semibold text-white">
-              {chip}
-            </span>
-          ) : null}
-        </span>
-        <span className="mt-3 flex items-center gap-3 pr-10">
-          <span className={`h-9 w-1 shrink-0 rounded-full ${accent}`} aria-hidden />
-          <span className="min-w-0">
-            <span className="block truncate font-bold">{title}</span>
-            <span className="block truncate text-xs text-muted-foreground">{detail}</span>
-          </span>
-        </span>
-      </Link>
-      <DrawingMenu id={id} title={title} shared={shared} />
-    </Reveal>
+      <section aria-label="Team workspaces" className="mt-8 rounded-xl bg-card p-5 md:p-8">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-xl font-bold">Team workspaces</h2>
+          <Link href="/workspaces" className="text-sm font-bold text-green underline-offset-4 hover:underline">
+            {teams.length ? "All workspaces" : "Start one"}
+          </Link>
+        </div>
+        {teams.length ? (
+          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="gallery-workspaces">
+            {teams.map((w) => (
+              <li key={w.id}>
+                <Link
+                  href={`/workspaces/${w.id}`}
+                  className="flex items-center gap-3 rounded-lg border border-beige-500/30 bg-white px-4 py-3 outline-none hover:border-green/50 focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-beige-100 font-bold" aria-hidden>
+                    {w.name.trim().charAt(0).toUpperCase() || "W"}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate font-bold">{w.name}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {w.drawings} {w.drawings === 1 ? "drawing" : "drawings"}, {w.members} {w.members === 1 ? "person" : "people"}
+                    </span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="max-w-prose text-sm text-muted-foreground">
+            A workspace is a place for a class, a study group or a team: invite people once, and everyone in it can
+            open its drawings.
+          </p>
+        )}
+      </section>
+    </>
   );
 }
 

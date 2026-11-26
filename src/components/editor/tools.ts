@@ -3,12 +3,14 @@ import {
   ChartSpline,
   Circle,
   Eraser,
+  Frame,
   Hand,
   ImagePlus,
   Lasso,
   Minus,
   MousePointer2,
   Pen,
+  ScanLine,
   Sigma,
   Square,
   SquareKanban,
@@ -30,7 +32,8 @@ export type Tool =
   | "text"
   | "equation"
   | "graph"
-  | "kanban";
+  | "kanban"
+  | "frame";
 
 export const TOOLS: { id: Tool; label: string; key: string; Icon: LucideIcon }[] = [
   { id: "select", label: "Select", key: "v", Icon: MousePointer2 },
@@ -46,12 +49,16 @@ export const TOOLS: { id: Tool; label: string; key: string; Icon: LucideIcon }[]
   { id: "equation", label: "Equation", key: "m", Icon: Sigma },
   { id: "graph", label: "Graph", key: "g", Icon: ChartSpline },
   { id: "kanban", label: "To-do board", key: "k", Icon: SquareKanban },
+  { id: "frame", label: "Frame (a slide)", key: "f", Icon: Frame },
 ];
 
 /** What view-only collaborators can use. */
 export const VIEW_TOOLS: Tool[] = ["select", "lasso", "hand"];
 
 export const IMAGE_ACTION = { label: "Image or video", key: "i", Icon: ImagePlus };
+
+/** A photo or screenshot of an equation, traced into pen strokes (trace-picture-dialog.tsx). */
+export const TRACE_ACTION = { label: "Trace a picture", key: "u", Icon: ScanLine };
 
 /** What the file pickers offer: pictures, GIFs and the video formats browsers play. */
 export const MEDIA_ACCEPT = "image/*,video/mp4,video/webm,video/quicktime,.mp4,.m4v,.webm,.mov";
@@ -73,6 +80,15 @@ export const SWATCHES = [
 
 export type EraserMode = "stroke" | "pixel";
 
+/** The shape new frames are drawn in: a screen, a classroom projector, a square post, or any. */
+export type FrameAspect = "16:9" | "4:3" | "1:1" | "free";
+export const FRAME_ASPECTS: { id: FrameAspect; label: string; ratio: number | null }[] = [
+  { id: "16:9", label: "16:9", ratio: 16 / 9 },
+  { id: "4:3", label: "4:3", ratio: 4 / 3 },
+  { id: "1:1", label: "Square", ratio: 1 },
+  { id: "free", label: "Any", ratio: null },
+];
+
 export type Style = {
   color: string;
   penSize: number;
@@ -87,6 +103,7 @@ export type Style = {
   fillStyle: Sketch["fillStyle"];
   font: FontKind;
   fontSize: number;
+  frameAspect: FrameAspect;
 };
 
 export const DEFAULT_STYLE: Style = {
@@ -103,6 +120,7 @@ export const DEFAULT_STYLE: Style = {
   fillStyle: "hachure",
   font: "hand",
   fontSize: 36,
+  frameAspect: "16:9",
 };
 
 export const isShapeTool = (t: Tool) => t === "line" || t === "arrow" || t === "rect" || t === "ellipse";

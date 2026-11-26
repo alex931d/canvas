@@ -1,6 +1,6 @@
 "use client";
 
-import { Columns3, Copy, GalleryVerticalEnd, Pencil, Sparkles, Trash2 } from "lucide-react";
+import { Columns3, Copy, GalleryVerticalEnd, Pencil, Play, Sparkles, Trash2 } from "lucide-react";
 import { Button, toast } from "@/components/kit";
 import {
   useCallback,
@@ -19,15 +19,18 @@ import {
   elementBox,
   hitTest,
   hitTestAll,
+  insideFrame,
   insidePolygon,
   measureText,
   padRect,
+  pointInRect,
   polygonBounds,
   rectContainsRect,
   rectFromPoints,
   rectsIntersect,
   resetTextMetrics,
   scaleElement,
+  slidesOf,
   translateElement,
   unionRects,
   type Point,
@@ -49,13 +52,14 @@ import { drawCard } from "@/lib/canvas/kanban-render";
 import { useReducedMotion } from "motion/react";
 import { ElementEffects } from "@/lib/canvas/effects";
 import { KanbanEffects } from "@/lib/canvas/kanban-fx";
-import { drawElement, drawElementFx, drawScene, renderRegion, type RenderEnv } from "@/lib/canvas/render";
+import { drawElement, drawElementFx, drawScene, frameLabelRect, renderRegion, type RenderEnv } from "@/lib/canvas/render";
 import {
   FONT_FAMILIES,
   TEXT_LINE_HEIGHT,
   isVideoType,
   type AssetElement,
   type CanvasElement,
+  type FrameElement,
   type GraphElement,
   type KanbanElement,
   type MathElement,
@@ -72,7 +76,7 @@ import { GRAPH_COLORS, GraphEditor } from "./graph-editor";
 import { KanbanEditor, type KanbanEdit, type KanbanEditorHandle } from "./kanban-editor";
 import { MathCard, type MathState } from "./math-card";
 import { MediaControls } from "./media-controls";
-import { MEDIA_ACCEPT, TOOLS, VIEW_TOOLS, type Style, type Tool } from "./tools";
+import { FRAME_ASPECTS, MEDIA_ACCEPT, TOOLS, TRACE_ACTION, VIEW_TOOLS, type Style, type Tool } from "./tools";
 import { ZoomControls } from "./zoom-controls";
 
 // ------------------------------------------------------------------ types
@@ -89,12 +93,29 @@ export type FlashcardCapture = {
   text: string;
 };
 
+/** Strokes traced from part of a picture (src/lib/canvas/trace.ts), in the traced pixels. */
+export type TracedPicture = {
+  strokes: { points: number[]; size: number }[];
+  /** The traced pixels' size. */
+  width: number;
+  height: number;
+  /** How big that part of the picture is, in the picture's own pixels (sets the size on the board). */
+  naturalWidth: number;
+  naturalHeight: number;
+};
+
 export type BoardHandle = {
   /** Put images, GIFs and videos on the board. */
   insertFiles: (files: File[]) => void;
+  /** Put traced strokes in the middle of the view, in the pen colour, selected. Returns how many. */
+  insertTraced: (picture: TracedPicture) => number;
   startMathCheck: () => void;
   /** Typeset and place an equation in the middle of the view. */
   insertMath: (value: Pick<MathElement, "syntax" | "source">) => Promise<void>;
+  /** Bring a frame into view and select it, in the part of the board not covered on the right. */
+  goToFrame: (id: string, coveredRight?: number) => void;
+  /** A new frame around what's selected (or the view), in the frame tool's shape. Returns its id. */
+  frameSelection: () => string | null;
 };
 
 type Handle = "nw" | "ne" | "sw" | "se";
@@ -180,6 +201,9 @@ export function Board({
   onPointerWorld,
   onSelectionChange,
   onMakeFlashcard,
+  onTracePicture,
+  onOpenFrame,
+  onPresentFrame,
   ref,
 }: {
   drawingId: string;
@@ -206,6 +230,12 @@ export function Board({
   onSelectionChange?: (ids: string[]) => void;
   /** Capture the selection as a picture and start a flashcard from it. */
   onMakeFlashcard?: (capture: FlashcardCapture) => void;
+  /** Open "Trace a picture" (the U key). */
+  onTracePicture?: () => void;
+  /** A frame's title was double-clicked: show it in the slides panel. */
+  onOpenFrame?: (id: string) => void;
+  /** Present the slides, starting from this frame. */
+  onPresentFrame?: (id: string) => void;
   ref?: Ref<BoardHandle>;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -247,6 +277,8 @@ export function Board({
   const pointersRef = useRef(new Map<number, Point>());
   const sceneCacheRef = useRef<HTMLCanvasElement | null>(null);
   const hoverRef = useRef<Point | null>(null);
+  /** The frame whose title or edge is under the pointer (select tool). */
+  const frameHoverRef = useRef<string | null>(null);
   const spaceRef = useRef(false);
   const camReadyRef = useRef(false);
   const rafRef = useRef(0);
@@ -298,7 +330,16 @@ export function Board({
     get kanbanFx() {
       return kanbanFxRef.current;
     },
+    frameLabel: (el) => el.title,
+    // Selected frames and the one under the pointer: drawn stronger.
+    get activeFrameIds() {
+      const ids = new Set(propsRef.current.selected);
+      if (frameHoverRef.current) ids.add(frameHoverRef.current);
+      return ids;
+    },
   };
+  /** For pictures of the board (checking maths, flashcards): no frame outlines. */
+  const pictureEnv = (): RenderEnv => ({ getImage: env.getImage, getMedia: env.getMedia });
 
   // ------------------------------------------------------------- helpers
 
@@ -649,11 +690,12 @@ export function Board({
   );
 
   const zoomToRect = useCallback(
-    (r: Rect | null, maxZ = 1) => {
+    (r: Rect | null, maxZ = 1, coveredRight = 0) => {
       const canvas = canvasRef.current;
       if (!canvas || !r) return;
       const dpr = window.devicePixelRatio || 1;
-      const w = canvas.width / dpr;
+      // A side panel over the right of the board: fit into what's still visible.
+      const w = Math.max(160, canvas.width / dpr - coveredRight);
       const h = canvas.height / dpr;
       const z = clamp(Math.min((w * 0.85) / Math.max(r.w, 1), (h * 0.85) / Math.max(r.h, 1)), MIN_Z, maxZ);
       applyCam({ x: r.x + r.w / 2 - w / 2 / z, y: r.y + r.h / 2 - h / 2 / z, z });
@@ -974,7 +1016,7 @@ export function Board({
         background: propsRef.current.background,
         region,
         scale,
-        env,
+        env: pictureEnv(),
         clip: polygon ?? undefined,
       });
       let dataUrl = canvas.toDataURL("image/png");
@@ -1030,7 +1072,7 @@ export function Board({
       background: propsRef.current.background,
       region,
       scale,
-      env,
+      env: pictureEnv(),
       clip: polygon,
     });
     const blob =
@@ -1164,8 +1206,113 @@ export function Board({
     [dispatch, setTool],
   );
 
+  /**
+   * Traced strokes go where a picture would: in the middle of the view, at
+   * the picture's on-screen size (a phone photo is shrunk to 60 % of the
+   * view; a screenshot keeps its size), as one change that one undo removes.
+   */
+  const insertTraced = (picture: TracedPicture): number => {
+    const canvas = canvasRef.current;
+    if (!canvas || picture.strokes.length === 0) return 0;
+    const dpr = window.devicePixelRatio || 1;
+    const c = camRef.current;
+    const viewW = canvas.width / dpr / c.z;
+    const viewH = canvas.height / dpr / c.z;
+    const w0 = picture.naturalWidth / dpr;
+    const h0 = picture.naturalHeight / dpr;
+    const fit = Math.min(1, (viewW * 0.6) / w0, (viewH * 0.6) / h0);
+    const k = (w0 * fit) / picture.width; // world units per traced pixel
+    const x0 = c.x + viewW / 2 - (picture.width * k) / 2;
+    const y0 = c.y + viewH / 2 - (picture.height * k) / 2;
+    const s = propsRef.current.style;
+    const color = s.color === "#ffffff" ? "#201f24" : s.color;
+    const added: CanvasElement[] = picture.strokes.map((st) => ({
+      id: newId(),
+      type: "stroke",
+      color,
+      brush: "marker",
+      size: clamp(round1(st.size * k), 0.5, 400),
+      points: st.points.slice(0, MAX_STROKE_COORDS).map((v, i) => round1(i % 2 === 0 ? x0 + v * k : y0 + v * k)),
+    }));
+    dispatch({ type: "add", elements: added });
+    setSelected(added.map((a) => a.id));
+    setLassoRegion(null);
+    setTool("select");
+    return added.length;
+  };
+
+  /** A frame's box in the frame tool's shape: around `content` (padded), or 60% of the view centred on `at`. */
+  const frameAround = (at: Point, content: Rect | null): Rect => {
+    const z = camRef.current.z;
+    const ratio = FRAME_ASPECTS.find((a) => a.id === propsRef.current.style.frameAspect)?.ratio ?? null;
+    let w: number;
+    let h: number;
+    let cx = at.x;
+    let cy = at.y;
+    if (content) {
+      const pad = Math.max(content.w, content.h) * 0.06 + 16 / z;
+      w = content.w + pad * 2;
+      h = content.h + pad * 2;
+      cx = content.x + content.w / 2;
+      cy = content.y + content.h / 2;
+      if (ratio) {
+        if (w / ratio >= h) h = w / ratio;
+        else w = h * ratio;
+      }
+    } else {
+      const r = ratio ?? 16 / 9;
+      const vw = Math.max(viewport.w, 320) / z;
+      const vh = Math.max(viewport.h, 240) / z;
+      w = vw * 0.6;
+      h = w / r;
+      if (h > vh * 0.6) {
+        h = vh * 0.6;
+        w = h * r;
+      }
+    }
+    return { x: round1(cx - w / 2), y: round1(cy - h / 2), w: round1(Math.max(1, w)), h: round1(Math.max(1, h)) };
+  };
+
+  /** A new frame's title and place in the slide order: after the last slide. */
+  const nextSlide = () => {
+    const slides = slidesOf(elementsRef.current);
+    return {
+      title: `Slide ${slides.length + 1}`,
+      order: slides.length ? Math.floor(slides[slides.length - 1].order) + 1 : 1,
+    };
+  };
+
+  const goToFrame = (id: string, coveredRight = 0) => {
+    const frame = elementsRef.current.find((el) => el.id === id);
+    if (!frame || frame.type !== "frame") return;
+    zoomToRect(elementBox(frame), 8, coveredRight);
+    setSelected([id]);
+    setLassoRegion(null);
+  };
+
+  const frameSelection = () => {
+    if (readOnly) return null;
+    const set = new Set(selected);
+    const content =
+      lassoRegion && lassoRegion.length > 2
+        ? polygonBounds(lassoRegion)
+        : unionRects(elementsRef.current.filter((el) => set.has(el.id) && el.type !== "eraser").map(elementBounds));
+    const c = camRef.current;
+    const center = { x: c.x + viewport.w / 2 / c.z, y: c.y + viewport.h / 2 / c.z };
+    const frame: FrameElement = { id: newId(), type: "frame", ...frameAround(center, content), ...nextSlide() };
+    ownAddsRef.current.add(frame.id);
+    dispatch({ type: "add", elements: [frame] });
+    setSelected([frame.id]);
+    setLassoRegion(null);
+    setTool("select");
+    return frame.id;
+  };
+
   useImperativeHandle(ref, () => ({
+    goToFrame,
+    frameSelection,
     insertFiles: (files) => void insertFiles(files),
+    insertTraced,
     insertMath,
     startMathCheck: () => {
       if (selected.length > 0 || (lassoRegion && lassoRegion.length > 2)) checkSelection();
@@ -1179,6 +1326,29 @@ export function Board({
   // ------------------------------------------------------------ pointer
 
   const hitTolerance = () => 6 / camRef.current.z;
+
+  /** A frame whose title is at this point (titles sit above frames, at screen size). */
+  const frameTitleAt = (p: Point): FrameElement | null => {
+    const px = 1 / camRef.current.z;
+    const els = elementsRef.current;
+    for (let i = els.length - 1; i >= 0; i--) {
+      const el = els[i];
+      if (el.type === "frame" && pointInRect(p, frameLabelRect(el, el.title, px))) return el;
+    }
+    return null;
+  };
+  /** What a select-tool click lands on: a frame's title first, then the topmost thing drawn. */
+  const hitAt = (p: Point) => frameTitleAt(p) ?? hitTestAll(elementsRef.current, p, hitTolerance());
+
+  /** These elements, plus whatever sits wholly inside any frame among them: frames carry their contents. */
+  const withFrameContents = (ids: ReadonlySet<string>) => {
+    const els = elementsRef.current;
+    const carried = new Set(ids);
+    for (const el of els) {
+      if (el.type === "frame" && ids.has(el.id)) for (const c of insideFrame(els, el)) carried.add(c.id);
+    }
+    return els.filter((el) => carried.has(el.id));
+  };
 
   const handleAt = (sx: number, sy: number): Handle | null => {
     const box = selectionBox(selected);
@@ -1271,6 +1441,8 @@ export function Board({
           yMax: 4,
           grid: true,
         };
+      case "frame":
+        return { id, type: "frame", x: round1(p.x), y: round1(p.y), w: 0, h: 0, ...nextSlide() };
       case "rect":
       case "ellipse":
         return {
@@ -1384,7 +1556,7 @@ export function Board({
           interRef.current = { kind: "resize", handle, box0: unionRects(originals.map(elementBox))!, originals, keepAspect };
           break;
         }
-        const hit = hitTestAll(elementsRef.current, p, hitTolerance());
+        const hit = hitAt(p);
         if (hit) {
           let ids = selected;
           if (e.shiftKey) {
@@ -1422,7 +1594,8 @@ export function Board({
           interRef.current = {
             kind: "move",
             start: p,
-            originals: readOnly ? [] : elementsRef.current.filter((el) => set.has(el.id)),
+            // Alt moves a frame without what's in it.
+            originals: readOnly ? [] : e.altKey ? elementsRef.current.filter((el) => set.has(el.id)) : withFrameContents(set),
             moved: false,
             click,
           };
@@ -1499,7 +1672,13 @@ export function Board({
         if (tool === "select" && !spaceRef.current) {
           const h = readOnly ? null : handleAt(sx, sy);
           if (h) setCursor(h === "nw" || h === "se" ? "nwse-resize" : "nesw-resize");
-          else setCursor(hoverCursor(hitTestAll(elementsRef.current, p, hitTolerance()), p));
+          const hit = hitAt(p);
+          const frameId = hit?.type === "frame" ? hit.id : null;
+          if (frameId !== frameHoverRef.current) {
+            frameHoverRef.current = frameId;
+            schedulePaint();
+          }
+          if (!h) setCursor(hoverCursor(hit, p));
         } else {
           setCursor(toolCursor());
         }
@@ -1571,6 +1750,20 @@ export function Board({
             d.y = round1(r.y);
             d.w = round1(r.w);
             d.h = round1(r.h);
+          } else if (d.type === "frame") {
+            // The frame tool's shape; Shift draws any shape (or a square, when the shape is "Any").
+            const ratio = FRAME_ASPECTS.find((a) => a.id === style.frameAspect)?.ratio ?? null;
+            const r = e.shiftKey ? (ratio ? null : 1) : ratio;
+            let w = Math.abs(dx);
+            let h = Math.abs(dy);
+            if (r) {
+              if (w / r >= h) h = w / r;
+              else w = h * r;
+            }
+            d.x = round1(dx < 0 ? o.x - w : o.x);
+            d.y = round1(dy < 0 ? o.y - h : o.y);
+            d.w = round1(w);
+            d.h = round1(h);
           } else if (d.type === "rect" || d.type === "ellipse") {
             if (e.shiftKey) {
               const m = Math.max(Math.abs(dx), Math.abs(dy));
@@ -1675,6 +1868,18 @@ export function Board({
             openGraph(g);
             break;
           }
+          if (d.type === "frame") {
+            const z = camRef.current.z;
+            const frame: FrameElement =
+              d.w * z >= 12 && d.h * z >= 12
+                ? { ...d }
+                : { ...d, ...frameAround(inter.origin, null) };
+            ownAddsRef.current.add(frame.id);
+            dispatch({ type: "add", elements: [frame] });
+            setSelected([frame.id]);
+            setTool("select");
+            break;
+          }
           const meaningful =
             d.type === "line"
               ? Math.hypot(d.x2 - d.x1, d.y2 - d.y1) >= 1
@@ -1756,8 +1961,9 @@ export function Board({
     if (readOnly || (tool !== "select" && tool !== "text")) return;
     const { sx, sy } = eventPoint(e);
     const p = screenToWorld(sx, sy);
-    const hit = hitTestAll(elementsRef.current, p, hitTolerance());
-    if (hit?.type === "text") startEditing(p, hit);
+    const hit = tool === "select" ? hitAt(p) : hitTestAll(elementsRef.current, p, hitTolerance());
+    if (hit?.type === "frame") onOpenFrame?.(hit.id);
+    else if (hit?.type === "text") startEditing(p, hit);
     else if (hit?.type === "math") openEquation(p, hit);
     else if (hit?.type === "graph") openGraph(hit);
     else if (hit?.type === "kanban") {
@@ -1873,10 +2079,8 @@ export function Board({
       const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
       const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
       const set = new Set(selected);
-      dispatch({
-        type: "update",
-        elements: elementsRef.current.filter((el) => set.has(el.id)).map((el) => translateElement(el, dx, dy)),
-      });
+      const moving = e.altKey ? elementsRef.current.filter((el) => set.has(el.id)) : withFrameContents(set);
+      dispatch({ type: "update", elements: moving.map((el) => translateElement(el, dx, dy)) });
       return;
     }
     if (e.shiftKey && e.key === "!") {
@@ -1890,6 +2094,10 @@ export function Board({
     if (e.altKey || e.shiftKey) return;
     if (key === "i") {
       if (!readOnly) fileInputRef.current?.click();
+      return;
+    }
+    if (key === TRACE_ACTION.key) {
+      if (!readOnly) onTracePicture?.();
       return;
     }
     const t = TOOLS.find((x) => x.key === key);
@@ -2127,6 +2335,7 @@ export function Board({
         onPointerCancel={(e) => finishPointer(e, true)}
         onPointerLeave={() => {
           hoverRef.current = null;
+          frameHoverRef.current = null;
           onPointerWorld?.(null);
           if (tool === "eraser") schedulePaint();
         }}
@@ -2183,6 +2392,30 @@ export function Board({
               <GalleryVerticalEnd /> Flashcard
             </Button>
           ) : null}
+          {(() => {
+            const el = selected.length === 1 ? elements.find((x) => x.id === selected[0]) : undefined;
+            if (el?.type !== "frame") return null;
+            return (
+              <>
+                {onPresentFrame ? (
+                  <Button size="sm" variant="ghost" onClick={() => onPresentFrame(el.id)} title="Present from this slide">
+                    <Play /> Present
+                  </Button>
+                ) : null}
+                {onOpenFrame && !readOnly ? (
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label="Rename slide"
+                    title="Rename slide"
+                    onClick={() => onOpenFrame(el.id)}
+                  >
+                    <Pencil />
+                  </Button>
+                ) : null}
+              </>
+            );
+          })()}
           {(() => {
             if (readOnly) return null;
             const el = selected.length === 1 ? elements.find((x) => x.id === selected[0]) : undefined;
@@ -2323,10 +2556,10 @@ export function Board({
 const round2 = (v: number) => Math.round(v * 100) / 100;
 
 /** The stroke eraser leaves these alone (delete them with the selection instead). */
-const UNERASABLE = new Set<CanvasElement["type"]>(["image", "gif", "video", "graph", "kanban", "eraser"]);
+const UNERASABLE = new Set<CanvasElement["type"]>(["image", "gif", "video", "graph", "kanban", "eraser", "frame"]);
 
 /** Corner drags keep these in proportion (Shift to stretch, or for a board: to change only its width). */
-const KEEP_ASPECT = new Set<CanvasElement["type"]>(["image", "gif", "video", "text", "kanban"]);
+const KEEP_ASPECT = new Set<CanvasElement["type"]>(["image", "gif", "video", "text", "kanban", "frame"]);
 
 /** A to-do card following the pointer, tilted a little, with a shadow. */
 function drawDraggedCard(
