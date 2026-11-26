@@ -394,7 +394,13 @@ export function CanvasEditor({
     const unsubscribe = session.subscribe(setBrowserStatus);
     const cache = new AssetCache(id, () => session.assets, bumpImages, false);
     let cancelled = false;
-    void session.open().then(({ editable }) => {
+    // Another tab editing it: look for now; once that tab closes, edit here.
+    const takeOver = () => {
+      if (cancelled) return;
+      setOpenElsewhere(false);
+      toast.info("You can edit this drawing here now.", { id: "took-over" });
+    };
+    void session.open(takeOver).then(({ editable }) => {
       if (cancelled) return;
       if (!editable) setOpenElsewhere(true);
       setBrowserStatus(session.getStatus());
