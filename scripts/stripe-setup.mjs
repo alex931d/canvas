@@ -1,6 +1,10 @@
 // Creates the membership's product and $5/month price in your Stripe account
 // (what `npm run stripe:setup` runs), then prints the STRIPE_PRICE_ID to use.
 //
+// The product gets a tax code (Software as a service, personal use), which
+// Stripe requires for Checkout when Managed Payments is on, as it is by
+// default on new accounts. An existing product without one gets it too.
+//
 // Safe to run again: it finds the price by its lookup key instead of making
 // another. Uses STRIPE_SECRET_KEY from .env.local: run it once with your test
 // key and once with your live key.
@@ -12,10 +16,12 @@ nextEnv.loadEnvConfig(process.cwd(), false, { info: () => {}, error: console.err
 // Keep in step with MEMBERSHIP in src/lib/billing/plan.ts.
 const PLAN = {
   productName: "canvas membership",
-  unitAmount: 100,
+  unitAmount: 500,
   currency: "usd",
   interval: "month",
   lookupKey: "canvas_membership_monthly",
+  // https://docs.stripe.com/payments/managed-payments/eligibility#product-tax-code-requirements
+  taxCode: "txcd_10103000",
 };
 
 const key = process.env.STRIPE_SECRET_KEY;
@@ -55,11 +61,20 @@ try {
       recurring: { interval: PLAN.interval },
       lookup_key: PLAN.lookupKey,
       transfer_lookup_key: true,
-      product_data: { name: PLAN.productName },
+      product_data: { name: PLAN.productName, tax_code: PLAN.taxCode },
     });
     console.log(`Created ${price.id} in ${mode} mode.`);
   } else {
     console.log(`Found ${price.id} in ${mode} mode.`);
+  }
+
+  // Older setups made the product without a tax code; Checkout refuses it under Managed Payments.
+  const productId = typeof price.product === "string" ? price.product : price.product.id;
+  const product = await stripe.products.retrieve(productId);
+  const current = typeof product.tax_code === "string" ? product.tax_code : product.tax_code?.id;
+  if (current !== PLAN.taxCode) {
+    await stripe.products.update(productId, { tax_code: PLAN.taxCode });
+    console.log(`Set ${productId}'s tax code to ${PLAN.taxCode} (Software as a service, personal use).`);
   }
 
   console.log(
