@@ -97,7 +97,7 @@ export type ProofVerdict = {
 
 /** Reads the AI's JSON answer, forgiving code fences and missing parts. */
 export function parseProofVerdict(text: string, rows: number): ProofVerdict | null {
-  const body = text.replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
+  const body = text.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim().replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
   const start = body.indexOf("{");
   const end = body.lastIndexOf("}");
   if (start < 0 || end <= start) return null;

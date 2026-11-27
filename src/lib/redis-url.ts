@@ -1,3 +1,5 @@
+import { envValue } from "./env-value";
+
 /**
  * Where Redis is, as a redis:// or rediss:// connection string:
  *
@@ -14,11 +16,13 @@
  * Redis that deploy/compose.yml runs next to the app). Null when none is set.
  */
 export function redisUrl(env: Record<string, string | undefined> = process.env): string | null {
-  const direct = env.REDIS_URL?.trim();
-  if (direct) return direct;
-  const rest = env.UPSTASH_REDIS_REST_URL?.trim();
-  const token = env.UPSTASH_REDIS_REST_TOKEN?.trim();
-  const bundled = env.BUNDLED_REDIS_URL?.trim() || null;
+  const token = envValue("UPSTASH_REDIS_REST_TOKEN", env);
+  const direct = envValue("REDIS_URL", env);
+  // Upstash's REST URL pasted as REDIS_URL: use it as the REST URL.
+  const restInDirect = direct && /^https?:\/\//i.test(direct) ? direct : undefined;
+  if (direct && !restInDirect) return direct;
+  const rest = envValue("UPSTASH_REDIS_REST_URL", env) ?? restInDirect;
+  const bundled = envValue("BUNDLED_REDIS_URL", env) ?? null;
   if (!rest || !token) return bundled;
   let host: string;
   try {
@@ -27,6 +31,6 @@ export function redisUrl(env: Record<string, string | undefined> = process.env):
     return bundled;
   }
   if (!host) return bundled;
-  const port = env.UPSTASH_REDIS_PORT?.trim() || "6379";
+  const port = envValue("UPSTASH_REDIS_PORT", env)?.replace(/\D/g, "") || "6379";
   return `rediss://default:${encodeURIComponent(token)}@${host}:${port}`;
 }

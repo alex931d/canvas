@@ -53,6 +53,8 @@ import { accessoriesFor, DEFAULT_SETTINGS, levelFor, settingsSchema, streakFrom,
 import { CollabDoc, type RemoteChange } from "../src/lib/collab/doc";
 import { canUse, MEMBER_FEATURES } from "../src/lib/billing/plan";
 import { redisUrl } from "../src/lib/redis-url";
+import { envValue, redactSecrets } from "../src/lib/env-value";
+import { parseJsonReply } from "../src/lib/ai/json-reply";
 import { applyOps, type DocOp } from "../src/lib/collab/ops";
 import { compileExpression, ExprError, formatTick, niceStep } from "../src/lib/math/expr";
 import { easterSunday, resolveTheme, themeForDate } from "../src/lib/seasons";
@@ -305,6 +307,25 @@ eq(
   redisUrl({ REDIS_URL: "redis://a:1", UPSTASH_REDIS_REST_URL: "https://b.upstash.io", UPSTASH_REDIS_REST_TOKEN: "t" }),
   "redis://a:1",
 );
+eq("quotes pasted around values are dropped", [envValue("A", { A: ' "abc" ' }), envValue("A", { A: "abc\"" }), envValue("A", { A: "''" }), envValue("A", {})], ["abc", "abc", undefined, undefined]);
+eq(
+  "a stray quote on REDIS_URL is dropped",
+  redisUrl({ REDIS_URL: 'rediss://default:t@host.upstash.io:6379"' }),
+  "rediss://default:t@host.upstash.io:6379",
+);
+eq(
+  "quoted Upstash settings work",
+  redisUrl({ UPSTASH_REDIS_REST_URL: '"https://b.upstash.io"', UPSTASH_REDIS_REST_TOKEN: "'tok'" }),
+  "rediss://default:tok@b.upstash.io:6379",
+);
+eq(
+  "Upstash's REST URL pasted as REDIS_URL",
+  redisUrl({ REDIS_URL: "https://b.upstash.io", UPSTASH_REDIS_REST_TOKEN: "tok" }),
+  "rediss://default:tok@b.upstash.io:6379",
+);
+eq("passwords in errors are masked", redactSecrets("connect EINVAL //default:s3cret@host:6379 and redis://u:p@x"), "connect EINVAL //default:***@host:6379 and redis://u:***@x");
+eq("thinking before the JSON is skipped", parseJsonReply('<think>maybe {"a":0}</think>\n{"a":1}'), { a: 1 });
+eq("a proof verdict after thinking", parseProofVerdict('<think>{x}</think>{"valid":true,"summary":"ok","lines":[]}', 0)?.valid, true);
 eq("a URL without its token is nothing", redisUrl({ UPSTASH_REDIS_REST_URL: "https://b.upstash.io" }), null);
 eq(
   "on the VPS, Upstash's wins over the bundled Redis, which is used otherwise",

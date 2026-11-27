@@ -1,11 +1,17 @@
 import "server-only";
 
+import { envValue } from "@/lib/env-value";
+import { parseJsonReply, stripThinking } from "./json-reply";
+
+export { parseJsonReply };
+
 /**
  * One question to any OpenAI-compatible chat API. Defaults to Google's
  * Gemini API free tier; switch with env vars:
  *
  *   AI_BASE_URL  https://generativelanguage.googleapis.com/v1beta/openai   (Gemini)
- *                https://api.groq.com/openai/v1                            (Groq)
+ *                https://api.groq.com/openai/v1                            (Groq: AI_MODEL=qwen/qwen3.8-27b,
+ *                                                                           which reads images for the math check)
  *                http://localhost:11434/v1                                 (Ollama, local)
  *   AI_API_KEY   provider key (not needed for Ollama)
  *   AI_MODEL     e.g. gemini-3.8-flash, qwen/qwen3.8-27b, qwen3-vl:8b
@@ -37,10 +43,10 @@ export class AiError extends Error {
 }
 
 export function aiConfig() {
-  const baseUrl = (process.env.AI_BASE_URL || DEFAULTS.baseUrl).replace(/\/+$/, "");
-  const apiKey = process.env.AI_API_KEY || "";
-  const model = process.env.AI_MODEL || DEFAULTS.model;
-  const fallbackModel = process.env.AI_FALLBACK_MODEL?.trim() || null;
+  const baseUrl = (envValue("AI_BASE_URL") || DEFAULTS.baseUrl).replace(/\/+$/, "");
+  const apiKey = envValue("AI_API_KEY") || "";
+  const model = envValue("AI_MODEL") || DEFAULTS.model;
+  const fallbackModel = envValue("AI_FALLBACK_MODEL") || null;
   const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\//.test(baseUrl + "/");
   return { baseUrl, apiKey, model, fallbackModel, isLocal };
 }
@@ -57,15 +63,6 @@ const RETRY_PAUSES_MS = [1000, 3000];
 const MAX_PAUSE_MS = 5000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Pull the first JSON object out of a reply, tolerating ```json fences. */
-export function parseJsonReply(text: string): unknown {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const candidate = (fenced ? fenced[1] : text).trim();
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start === -1 || end <= start) throw new Error("no JSON object in reply");
-  return JSON.parse(candidate.slice(start, end + 1));
-}
 
 type UserContent = string | ({ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } })[];
 
@@ -150,7 +147,8 @@ export async function askAi({
   if (!res.ok) {
     const detail = (await res.text().catch(() => "")).slice(0, 300);
     console.warn(`${tag} provider returned ${res.status}: ${detail}`);
-    if (res.status === 401 || res.status === 403) {
+    // Gemini answers a bad key with 400 "Please pass a valid API key" (API_KEY_INVALID).
+    if (res.status === 401 || res.status === 403 || (res.status === 400 && /api[ _-]?key/i.test(detail))) {
       throw new AiError("The AI provider rejected the API key. Check AI_API_KEY in .env.local.", 502);
     }
     if (res.status === 429) {
@@ -169,5 +167,5 @@ export async function askAi({
     choices?: { message?: { content?: string | { text?: string }[] } }[];
   } | null;
   const content = payload?.choices?.[0]?.message?.content;
-  return Array.isArray(content) ? content.map((c) => c.text ?? "").join("") : (content ?? "");
+  return stripThinking(Array.isArray(content) ? content.map((c) => c.text ?? "").join("") : (content ?? ""));
 }

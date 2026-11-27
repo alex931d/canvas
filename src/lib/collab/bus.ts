@@ -6,6 +6,7 @@ import type Redis from "ioredis";
 import { Client } from "pg";
 import { db } from "@/db";
 import { getRedis } from "@/lib/redis";
+import { redactSecrets } from "@/lib/env-value";
 import { redisUrl } from "@/lib/redis-url";
 import type { HubMessage } from "./notify";
 
@@ -65,7 +66,7 @@ let lastError = 0;
 function logError(what: string, err: unknown) {
   if (Date.now() - lastError < 60_000) return;
   lastError = Date.now();
-  console.error(`[bus] ${what}:`, err instanceof Error ? err.message : err);
+  console.error(`[bus] ${what}:`, redactSecrets(err instanceof Error ? err.message : String(err)));
 }
 
 // ----------------------------------------------------------------- redis
