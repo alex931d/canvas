@@ -18,7 +18,20 @@ const verdict = {
   correction: "x = 4",
 };
 
+// POST /__test/busy {"times": n, "model": "only-this-one"}: the next n answers
+// (for that model, or any) are 503 "high demand", like an overloaded provider.
+let busy = { times: 0, model: null };
+
 createServer((req, res) => {
+  if (req.method === "POST" && req.url === "/__test/busy") {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      busy = { times: 0, model: null, ...JSON.parse(raw || "{}") };
+      res.writeHead(204).end();
+    });
+    return;
+  }
   if (req.method !== "POST" || !req.url?.endsWith("/chat/completions")) {
     res.writeHead(404).end();
     return;
@@ -35,6 +48,18 @@ createServer((req, res) => {
       );
     } catch {
       /* ignore */
+    }
+    let asked = null;
+    try {
+      asked = JSON.parse(body).model;
+    } catch {
+      /* ignore */
+    }
+    if (busy.times > 0 && (!busy.model || busy.model === asked)) {
+      busy.times--;
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify([{ error: { code: 503, message: "This model is currently experiencing high demand.", status: "UNAVAILABLE" } }]));
+      return;
     }
     setTimeout(() => {
       res.writeHead(200, { "Content-Type": "application/json" });
