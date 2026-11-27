@@ -56,6 +56,15 @@ import { ElementEffects, inkLength, MAX_ANIMATED, staggerStep, traceDuration } f
 import { KanbanEffects } from "../src/lib/canvas/kanban-fx";
 import { DEFAULT_PREFERENCES, parsePreferences } from "../src/lib/preferences";
 import { avatarUrl, sniffImageType } from "../src/lib/profile/avatar";
+import { solveTriangle, triangleCorners } from "../src/lib/math/triangle";
+import { exactTrig, parseAngle, radiansTex, referenceAngle, unitPoint } from "../src/lib/math/trig";
+import { lintProof, normalizeStatement, parseProofVerdict, proofToText } from "../src/lib/math/proof";
+import { stoichiometry } from "../src/lib/chem/stoich";
+import { isProblem, parseWorksheetReply, problemsFromElements, shuffled, withAnswers } from "../src/lib/math/worksheet";
+import { proofFigure, triangleFigure, unitCircleFigure, worksheetFigure, PAGE } from "../src/lib/math/figures";
+import { stepsToTex } from "../src/lib/math/steps";
+import { combinedGas, idealGas } from "../src/lib/chem/gas";
+import { dilution, molarity, ph } from "../src/lib/chem/solution";
 import { findInk, simplify, traceStrokes, type Pixels } from "../src/lib/canvas/trace";
 
 let fails = 0;
@@ -779,5 +788,205 @@ eq("board effects off: no animations", kfx.busy, false);
   eq("initials for people without a picture", [initials("Maya Chen"), initials("cher"), initials("  ")], ["MC", "CH", "?"]);
 }
 
-console.log(fails ? `\n${fails} FAILED` : "\nall passed");
-process.exit(fails ? 1 : 0);
+{
+  // ---------------------------------------------------------------- triangles
+  const tri = (i: Parameters<typeof solveTriangle>[0]) => solveTriangle(i);
+  const sss = tri({ a: 3, b: 4, c: 5 });
+  eq("SSS 3-4-5 is right", sss.ok && [sss.case, sss.right], ["SSS", true]);
+  if (sss.ok) {
+    near("SSS angle C = 90", sss.solutions[0].triangle.C, 90);
+    near("SSS angle A", sss.solutions[0].triangle.A, 36.8699);
+    near("SSS area 6", sss.solutions[0].area, 6);
+    eq("SSS shows the law of cosines", sss.solutions[0].steps.some((s) => s.includes("\\cos A")), true);
+  }
+  eq("SSS that can't close", tri({ a: 1, b: 2, c: 3 }).ok, false);
+  const sas = tri({ a: 5, b: 7, C: 49 });
+  eq("SAS case", sas.ok && sas.case, "SAS");
+  if (sas.ok) {
+    near("SAS c", sas.solutions[0].triangle.c, 5.3, 0.01);
+    near("SAS angles add to 180", sas.solutions[0].triangle.A + sas.solutions[0].triangle.B + sas.solutions[0].triangle.C, 180);
+    near("SAS obtuse angle found right", sas.solutions[0].triangle.B, 85.6, 0.1);
+  }
+  const right = tri({ a: 3, b: 4, C: 90 });
+  eq("a right angle uses Pythagoras", right.ok && right.solutions[0].steps[1].includes("Pythagoras"), true);
+  const asa = tri({ A: 40, B: 60, c: 10 });
+  eq("ASA case", asa.ok && asa.case, "ASA");
+  if (asa.ok) near("ASA a", asa.solutions[0].triangle.a, 6.527, 0.01);
+  const aas = tri({ A: 40, B: 60, a: 10 });
+  eq("AAS case", aas.ok && aas.case, "AAS");
+  if (aas.ok) near("AAS b", aas.solutions[0].triangle.b, 13.473, 0.01);
+  const two = tri({ A: 30, a: 6, b: 10 });
+  eq("SSA ambiguous: two triangles", two.ok && two.solutions.length, 2);
+  if (two.ok) {
+    near("SSA first B", two.solutions[0].triangle.B, 56.44, 0.01);
+    near("SSA second B", two.solutions[1].triangle.B, 123.56, 0.01);
+  }
+  eq("SSA one triangle", (() => { const r = tri({ A: 30, a: 12, b: 10 }); return r.ok && r.solutions.length; })(), 1);
+  const none = tri({ A: 30, a: 3, b: 10 });
+  eq("SSA none", none.ok ? "ok" : none.error.startsWith("No triangle"), true);
+  eq("three angles only", tri({ A: 50, B: 60, C: 70 }).ok, false);
+  eq("too many angles", tri({ A: 100, B: 90, a: 3 }).ok, false);
+  eq("four values", tri({ a: 1, b: 1, c: 1, A: 60 }).ok, false);
+  if (sss.ok) {
+    const k = triangleCorners(sss.solutions[0].triangle, 100);
+    near("corner B on the x axis", k.B[0], 100);
+    near("corner C above A-B", k.C[1], -48);
+  }
+
+  // ---------------------------------------------------------------- trig
+  eq("sin 150", exactTrig("sin", 150).tex, "\\frac{1}{2}");
+  eq("cos 135", exactTrig("cos", 135).tex, "-\\frac{\\sqrt{2}}{2}");
+  eq("tan 240", exactTrig("tan", 240).tex, "\\sqrt{3}");
+  eq("sec 300", exactTrig("sec", 300).tex, "2");
+  eq("csc 210", exactTrig("csc", 210).tex, "-2");
+  eq("cot 330", exactTrig("cot", 330).tex, "-\\sqrt{3}");
+  eq("tan 90 undefined", exactTrig("tan", 90).undefined, true);
+  eq("cot 180 undefined", exactTrig("cot", 180).undefined, true);
+  eq("sin 270", exactTrig("sin", 270).tex, "-1");
+  eq("cos -60 coterminal", exactTrig("cos", -60).tex, "\\frac{1}{2}");
+  eq("sin 20 is a decimal", [exactTrig("sin", 20).exact, exactTrig("sin", 20).tex], [false, "0.342"]);
+  eq("quadrant step", exactTrig("cos", 135).steps.some((s) => s.includes("quadrant II")), true);
+  eq("parse degrees", parseAngle("150", "deg"), 150);
+  eq("parse 5pi/6", parseAngle("5pi/6", "rad"), 150);
+  eq("parse π", parseAngle("π", "rad"), 180);
+  eq("parse -3π/2", parseAngle("-3π/2", "rad"), -270);
+  eq("parse junk", parseAngle("abc", "rad"), null);
+  eq("radians tex", [radiansTex(150), radiansTex(180), radiansTex(-90), radiansTex(0)], ["\\frac{5\\pi}{6}", "\\pi", "-\\frac{\\pi}{2}", "0"]);
+  eq("reference angles", [referenceAngle(210), referenceAngle(300), referenceAngle(-30)], [30, 60, 30]);
+  eq("unit point 225", [unitPoint(225).xTex, unitPoint(225).yTex], ["-\\frac{\\sqrt{2}}{2}", "-\\frac{\\sqrt{2}}{2}"]);
+
+  // ---------------------------------------------------------------- proofs
+  const proof = {
+    given: "AB ≅ CD; BC ≅ DA",
+    prove: "△ABC ≅ △CDA",
+    rows: [
+      { statement: "AB ≅ CD", reason: "Given" },
+      { statement: "BC ≅ DA", reason: "Given" },
+      { statement: "AC ≅ CA", reason: "Reflexive property" },
+      { statement: "△ABC ≅ △CDA", reason: "SSS" },
+    ],
+  };
+  eq("a well formed proof", lintProof(proof), []);
+  eq("missing reason", lintProof({ ...proof, rows: [...proof.rows.slice(0, 3), { statement: "△ABC ≅ △CDA", reason: "" }] }).map((i) => i.row), [4]);
+  eq("wrong last line", lintProof({ ...proof, rows: proof.rows.slice(0, 3) }).map((i) => i.message.startsWith("The last")), [true]);
+  eq("Given that wasn't given", lintProof({ ...proof, rows: [{ statement: "AC ≅ BD", reason: "Given" }, ...proof.rows] }).map((i) => i.row), [1]);
+  eq("latex and symbols compare equal", normalizeStatement("\\triangle ABC \\cong \\triangle CDA"), normalizeStatement("△ABC ≅ △CDA"));
+  eq("proof as text", proofToText(proof).split("\n")[3], "1. AB ≅ CD | Given");
+  const v = parseProofVerdict('```json\n{"valid":false,"summary":"Line 3 needs work","lines":[{"ok":true,"note":""},{"ok":false,"note":"why?"}]}\n```', 3);
+  eq("proof verdict parsed", v && [v.valid, v.lines.map((l) => l.ok), v.lines[1].note], [false, [true, false, true], "why?"]);
+  eq("proof verdict junk", parseProofVerdict("no json here", 2), null);
+
+  // ---------------------------------------------------------------- stoichiometry
+  const st = stoichiometry("H2 + O2 -> H2O", [{ value: 4, unit: "g" }, { value: 16, unit: "g" }], { 0: 15 });
+  eq("limiting reagent", st.ok && st.limiting.species.body, "O2");
+  if (st.ok) {
+    near("water made", st.products[0].grams, 18.015, 0.01);
+    near("hydrogen left", st.reactants[0].leftGrams, 1.984, 0.01);
+    near("percent yield", st.products[0].percentYield!, 83.26, 0.05);
+  }
+  const st2 = stoichiometry("Fe + O2 -> Fe2O3", [{ value: 2, unit: "mol" }, undefined]);
+  eq("excess reactant left blank", st2.ok && [st2.limiting.species.body, +st2.products[0].moles.toFixed(3)], ["Fe", 1]);
+  eq("no amounts", stoichiometry("H2 + O2 -> H2O", []).ok, false);
+
+  // ---------------------------------------------------------------- gas laws
+  const g1 = idealGas({ n: { value: 1 }, T: { value: 0, unit: "C" }, P: { value: 1, unit: "atm" } });
+  eq("molar volume key", g1.ok && g1.key, "V");
+  if (g1.ok) near("molar volume at STP", g1.value, 22.41, 0.01);
+  const g2 = idealGas({ P: { value: 101.325, unit: "kPa" }, V: { value: 22414, unit: "mL" }, T: { value: 273.15, unit: "K" } });
+  if (g2.ok) near("moles from kPa and mL", g2.value, 1, 0.001);
+  else eq("moles from kPa and mL", g2.error, "ok");
+  eq("ideal gas needs three", idealGas({ P: { value: 1, unit: "atm" } }).ok, false);
+  const boyle = combinedGas({ P1: 1, V1: 10, P2: 2, pUnit: "atm", vUnit: "L", tUnit: "K" });
+  eq("Boyle's law", boyle.ok && [boyle.key, boyle.value, boyle.steps[0].includes("Boyle")], ["V2", 5, true]);
+  const charles = combinedGas({ V1: 2, T1: 27, T2: 127, pUnit: "atm", vUnit: "L", tUnit: "C" });
+  if (charles.ok) near("Charles's law with °C", charles.value, 2.6662, 0.001);
+  else eq("Charles's law with °C", charles.error, "ok");
+  const comb = combinedGas({ P1: 1, V1: 2, T1: 300, P2: 2, V2: 1, pUnit: "atm", vUnit: "L", tUnit: "K" });
+  if (comb.ok) near("combined T2", comb.value, 300);
+  const combP = combinedGas({ V1: 2, T1: 300, P2: 2, V2: 1, T2: 300, pUnit: "atm", vUnit: "L", tUnit: "K" });
+  if (combP.ok) near("combined P1", combP.value, 1);
+  else eq("combined P1", combP.error, "ok");
+  eq("two blanks", combinedGas({ P1: 1, V1: 2, pUnit: "atm", vUnit: "L", tUnit: "K" }).ok, false);
+
+  // ---------------------------------------------------------------- solutions and pH
+  const m1 = molarity({ formula: "NaCl", grams: 58.44, liters: 2 });
+  if (m1.ok) near("molarity from grams", m1.value, 0.5, 0.001);
+  else eq("molarity from grams", m1.error, "ok");
+  const m2 = molarity({ formula: "NaOH", molarity: 0.1, liters: 0.25 });
+  if (m2.ok) near("grams needed", m2.value, 0.99997, 0.001);
+  eq("molarity needs two", molarity({ liters: 1 }).ok, false);
+  const dl = dilution({ M1: 6, V1: 50, M2: 1.5 });
+  eq("dilution V2", dl.ok && dl.value, 200);
+  eq("dilution can't concentrate", dilution({ M1: 1, V1: 10, V2: 5 }).ok, false);
+  const p1 = ph({ kind: "strong-acid", value: 0.01 });
+  if (p1.ok) near("strong acid pH", p1.pH, 2);
+  const p2 = ph({ kind: "strong-base", value: 0.005, ions: 2 });
+  if (p2.ok) near("Ca(OH)2 pH", p2.pH, 12);
+  const p3 = ph({ kind: "weak-acid", value: 0.1, k: 1.8e-5 });
+  if (p3.ok) near("acetic acid pH", p3.pH, 2.875, 0.005);
+  const p4 = ph({ kind: "pOH", value: 4 });
+  if (p4.ok) eq("pOH to pH", [+p4.pH.toFixed(2), p4.steps.at(-1)], [10, "\\text{Basic}"]);
+  eq("negative concentration", ph({ kind: "H", value: -1 }).ok, false);
+}
+
+const figureTests = (async () => {
+  // ---------------------------------------------------------------- worksheets
+  const m = (id: string, source: string, x: number, y: number, syntax: "tex" | "chem" = "tex") =>
+    ({ id, type: "math" as const, syntax, source, color: "#000000", x, y, size: 20, w: 100, h: 24 });
+  const els = [m("c", "x^2 = 9", 0, 200), m("b", "3x = 12", 300, 5), m("a", "2x + 1 = 5", 0, 0), m("h", "H2 + O2 -> H2O", 0, 100, "chem")];
+  eq("equations in reading order, chemistry left out", problemsFromElements(els), ["2x + 1 = 5", "3x = 12", "x^2 = 9"]);
+  eq("only the selected ones", problemsFromElements(els, new Set(["c"])), ["x^2 = 9"]);
+  eq(
+    "labels, answers and working aren't problems",
+    ["90^\\circ", "c = 5", "\\theta = \\frac{3\\pi}{4}", "(-\\frac{\\sqrt{2}}{2},\\ \\frac{1}{2})", "\\begin{array}{l} a \\end{array}", "x = 4"].map(isProblem),
+    [false, false, false, false, false, false],
+  );
+  eq("problems are", ["2x + 3 = 11", "x^2 - 9 = 0", "\\int_0^1 x\\,dx", "y = 2x + 1", "\\frac{3}{4} + \\frac{1}{6}"].map(isProblem), [true, true, true, true, true]);
+  const ws = parseWorksheetReply({ title: "Linear", problems: [{ prompt: "2x=4", answer: "x=2" }, "y+1=2", { nope: 1 }, { prompt: "" }] }, "Fallback");
+  eq("worksheet reply parsed", ws && [ws.title, ws.instructions, ws.problems], ["Linear", "Show your work.", [{ prompt: "2x=4", answer: "x=2" }, { prompt: "y+1=2", answer: null }]]);
+  eq("worksheet reply with nothing usable", parseWorksheetReply({ problems: [] }, "x"), null);
+  eq("worksheet fallback title", parseWorksheetReply({ problems: ["a"] }, "Topic")?.title, "Topic");
+  eq("answers laid on the drawing's problems", withAnswers(["a", "b"], ws), [{ prompt: "a", answer: "x=2" }, { prompt: "b", answer: null }]);
+  let seed = 1;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const sh = shuffled([1, 2, 3, 4, 5], rnd);
+  eq("shuffle keeps every item", sh.slice().sort(), [1, 2, 3, 4, 5]);
+
+  // ---------------------------------------------------------------- figures
+  const measure = async (tex: string) => ({ width: Math.min(20, tex.length * 0.3), height: 1.2 });
+  const sas = solveTriangle({ a: 5, b: 7, C: 49 });
+  if (sas.ok) {
+    const fig = await triangleFigure(sas.solutions[0], sas.case, "#112233", measure);
+    eq("triangle: three sides drawn", fig.filter((p) => p.type === "line").length, 3);
+    eq("triangle: corners named", fig.filter((p) => p.type === "text").map((p) => (p as { text: string }).text).slice(0, 3), ["A", "B", "C"]);
+    eq("triangle: working typeset", fig.some((p) => p.type === "math" && p.source.startsWith("\\begin{array}")), true);
+    eq("every equation fits the canvas's limit", fig.every((p) => p.type !== "math" || p.source.length <= 2000), true);
+  }
+  const right = solveTriangle({ a: 3, b: 4, c: 5 });
+  if (right.ok) eq("right angle gets its square", (await triangleFigure(right.solutions[0], "SSS", "#000000", measure)).filter((p) => p.type === "line").length, 5);
+  const circle = await unitCircleFigure(150, "deg", { tex: "\\frac12", steps: ["\\sin 150^\\circ = \\frac12"] }, "#000000", measure);
+  eq("unit circle: 16 special angles marked", circle.filter((p) => p.type === "ellipse" && p.w === 8).length, 16);
+  eq("unit circle: the angle's point", circle.some((p) => p.type === "math" && p.source === "(-\\frac{\\sqrt{3}}{2},\\ \\frac{1}{2})"), true);
+  const pf = await proofFigure(
+    { given: "a", prove: "b", rows: [{ statement: "a", reason: "Given" }, { statement: "b", reason: "Magic" }] },
+    { valid: false, summary: "Line 2 needs a real reason.", lines: [{ ok: true, note: "" }, { ok: false, note: "No such theorem." }] },
+    "#000000",
+  );
+  const texts = pf.filter((p) => p.type === "text").map((p) => (p as { text: string }).text);
+  eq("proof table: numbered statements and reasons", ["1.  a", "Given", "2.  b", "Magic"].every((t) => texts.includes(t)), true);
+  eq("proof table: marks and notes", [texts.includes("✓"), texts.includes("✗"), texts.includes("No such theorem.")], [true, true, true]);
+  const many = { title: "Practice", instructions: "Solve.", problems: Array.from({ length: 12 }, (_, i) => ({ prompt: `x + ${i} = ${i * 2}`, answer: `x = ${i}` })) };
+  const wf = await worksheetFigure(many, "#000000", measure, { workSpace: 130 });
+  const frames = wf.filter((p) => p.type === "frame") as { title: string; x: number; y: number }[];
+  eq("worksheet pages and answer key", frames.map((f) => f.title), ["Practice (page 1)", "Practice (page 2)", "Practice (page 3)", "Answer key"]);
+  eq("answer key beside the first page", [frames[3].x, frames[3].y], [PAGE.w + 80, 0]);
+  const inside = wf.filter((p) => p.type === "math" && p.x < PAGE.w);
+  eq("every problem on a page", inside.every((p) => p.type === "math" && (p.y % (PAGE.h + 80)) + p.h <= PAGE.h), true);
+  eq("twelve problems placed", inside.length, 12);
+  eq("steps as one block", stepsToTex(["a", "b"]), "\\begin{array}{l} \\displaystyle a \\\\[6pt] \\displaystyle b \\end{array}");
+})();
+
+void figureTests.then(() => {
+  console.log(fails ? `\n${fails} FAILED` : "\nall passed");
+  process.exit(fails ? 1 : 0);
+});

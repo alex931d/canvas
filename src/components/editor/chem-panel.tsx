@@ -14,6 +14,8 @@ import {
 import { FormulaError, molarMass, parseSpecies, speciesToMhchem, speciesToText } from "@/lib/chem/formula";
 import type { MathElement } from "@/lib/canvas/schema";
 import { cn } from "@/lib/utils";
+import { AmountsTool, GasTool, SolutionsTool } from "./chem-calcs";
+import type { Place } from "./math-tools/shared";
 
 /**
  * Chemistry tools beside the canvas: molar mass (with a grams ⇄ moles
@@ -45,11 +47,13 @@ export function ChemPanel({
   open,
   onOpenChange,
   onInsert,
+  place,
   canInsert,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onInsert: Insert;
+  place: Place;
   canInsert: boolean;
 }) {
   const [tab, setTab] = useState("mass");
@@ -61,15 +65,18 @@ export function ChemPanel({
       onOpenChange={onOpenChange}
       modal={false}
       title="Chemistry"
-      description="Molar masses, balanced equations and the periodic table. Atomic weights are the IUPAC standard values."
+      description="Molar masses, balanced equations, amounts, gas laws, solutions and the periodic table. Atomic weights are the IUPAC standard values."
       className="overflow-y-auto sm:max-w-[680px]"
       onInteractOutside={(e) => e.preventDefault()}
       data-scrollable
     >
       <Tabs value={tab} onValueChange={setTab} className="gap-4 px-5 pb-6">
-        <TabList className="w-full">
+        <TabList className="w-full overflow-x-auto">
           <Tab value="mass">Molar mass</Tab>
           <Tab value="balance">Balance</Tab>
+          <Tab value="amounts">Amounts</Tab>
+          <Tab value="gases">Gases</Tab>
+          <Tab value="solutions">Solutions</Tab>
           <Tab value="table">Periodic table</Tab>
         </TabList>
         <TabPanel value="mass">
@@ -77,6 +84,15 @@ export function ChemPanel({
         </TabPanel>
         <TabPanel value="balance">
           <BalanceTool onInsert={onInsert} canInsert={canInsert} />
+        </TabPanel>
+        <TabPanel value="amounts">
+          <AmountsTool place={place} canInsert={canInsert} />
+        </TabPanel>
+        <TabPanel value="gases">
+          <GasTool place={place} canInsert={canInsert} />
+        </TabPanel>
+        <TabPanel value="solutions">
+          <SolutionsTool place={place} canInsert={canInsert} />
         </TabPanel>
         <TabPanel value="table">
           <PeriodicTable
