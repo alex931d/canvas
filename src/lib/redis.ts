@@ -1,5 +1,6 @@
 import "server-only";
 import Redis from "ioredis";
+import { redactSecrets } from "./env-value";
 import { redisUrl } from "./redis-url";
 
 /**
@@ -33,7 +34,7 @@ export function getRedis(): Redis | null {
   redis.on("error", (err) => {
     if (Date.now() - lastError < 60_000) return;
     lastError = Date.now();
-    console.error("[redis]", err.message);
+    console.error("[redis]", redactSecrets(err.message));
   });
   return (g.canvasRedis = redis);
 }
