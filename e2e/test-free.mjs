@@ -192,6 +192,19 @@ await page.click("button[aria-label=Share]");
 await waitFor(upgradeFeature);
 check("so does Share", (await upgradeFeature()) === "sharing");
 await closeDialog();
+await page.click("button[aria-label='Math tools']");
+await waitFor(upgradeFeature);
+check("so do the geometry, trig and proof tools", (await upgradeFeature()) === "math-tools");
+check("and the math panel stays shut", !(await page.$("[data-testid=math-panel]")));
+await closeDialog();
+await page.keyboard.press("/");
+await page.waitForSelector("[data-testid=tool-search] input", { timeout: 5000 });
+await page.type("[data-testid=tool-search] input", "worksheet");
+await sleep(200);
+await page.keyboard.press("Enter");
+await waitFor(upgradeFeature);
+check("and worksheets", (await upgradeFeature()) === "worksheets");
+await closeDialog();
 // Through the tool search.
 await page.keyboard.press("/");
 await page.waitForSelector("[data-testid=tool-search] input", { timeout: 5000 });
@@ -221,6 +234,7 @@ const apiStatus = (url, body = "{}") =>
     body,
   );
 check("the math check API needs an account", (await apiStatus("/api/check-math")) === 401);
+check("so do the proof check and worksheet APIs", (await apiStatus("/api/check-proof")) === 401 && (await apiStatus("/api/worksheet")) === 401);
 check("so does moving a drawing into an account", (await apiStatus("/api/drawings/import")) === 401);
 
 // ------------------------------------------------------------ one tab edits at a time

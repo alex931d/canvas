@@ -29,7 +29,15 @@ export const CENTS_A_DAY = Math.round(MEMBERSHIP.unitAmount / 30);
 export type Plan = "free" | "member";
 
 /** What only members can do. Everything else on the canvas is free. */
-export type MemberFeature = "math-check" | "chemistry" | "flashcards" | "sharing" | "workspaces" | "server-storage";
+export type MemberFeature =
+  | "math-check"
+  | "math-tools"
+  | "worksheets"
+  | "chemistry"
+  | "flashcards"
+  | "sharing"
+  | "workspaces"
+  | "server-storage";
 
 /**
  * How each member feature is offered to someone on the free plan: the
@@ -40,9 +48,17 @@ export const MEMBER_FEATURES: Record<MemberFeature, { title: string; text: strin
     title: "Checking math is part of the membership",
     text: "Loop around an equation, handwritten or a screenshot, and the AI checks each step and shows where it goes wrong.",
   },
+  "math-tools": {
+    title: "The geometry, trig and proof tools are part of the membership",
+    text: "Solve any triangle with the working shown, find exact trig values on the unit circle, and build two-column proofs the AI checks line by line.",
+  },
+  worksheets: {
+    title: "Worksheets are part of the membership",
+    text: "Turn the equations on a drawing, or a topic you pick, into a printable worksheet with an answer key.",
+  },
   chemistry: {
     title: "The chemistry tools are part of the membership",
-    text: "Molar masses with a grams-to-moles converter, an equation balancer that handles ions, and the periodic table.",
+    text: "Molar masses, an equation balancer, stoichiometry with limiting reagents, gas laws, molarity, dilution, pH and the periodic table.",
   },
   flashcards: {
     title: "Flashcards are part of the membership",
@@ -79,6 +95,7 @@ export const FREE_INCLUDES = [
 export const MEMBERSHIP_INCLUDES = [
   "Drawings kept in your account, on every device",
   "Step-by-step math checks",
+  "Geometry, trig and proof tools, and worksheets with answer keys",
   "Chemistry tools and flashcards",
   "Drawing live with others, and team workspaces",
   "Study buddies that keep your streak",

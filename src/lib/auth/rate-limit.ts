@@ -74,6 +74,8 @@ function makeLimiters() {
     passwordResetsByIp: bucket("passwordResetsByIp", 10, 10),
     /** 10 AI checks, then one every 30 s, per user: protects your AI quota. */
     mathByUser: bucket("mathByUser", 10, 30),
+    /** Proof checks and AI worksheets: 10, then one every 30 s, per user. */
+    aiToolsByUser: bucket("aiToolsByUser", 10, 30),
     /** 10 trips to Stripe (checkout or billing portal), then one every 10 s, per user. */
     billingByUser: bucket("billingByUser", 10, 10),
     /** Drawing changes: bursts of 120 requests, then 5 a second, per user. */

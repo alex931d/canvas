@@ -1,5 +1,6 @@
 import type { Point, Rect } from "@/lib/canvas/geometry";
 import type { CanvasElement, MathElement, TextElement } from "@/lib/canvas/schema";
+import type { FigurePart } from "@/lib/math/figures";
 import type { Camera } from "./camera";
 import type { DraftSession } from "./drafts";
 
@@ -29,6 +30,11 @@ export type BoardHandle = {
   /** Put traced strokes in the middle of the view, in the pen colour, selected. Returns how many. */
   insertTraced: (picture: TracedPicture) => number;
   startMathCheck: () => void;
+  /**
+   * Place a figure from the math or chemistry tools in the middle of the view
+   * (left of `coveredRight` pixels taken by a side panel), selected. Returns the new ids.
+   */
+  insertFigure: (parts: FigurePart[], coveredRight?: number) => string[];
   /** Typeset and place an equation in the middle of the view. */
   insertMath: (value: Pick<MathElement, "syntax" | "source">) => Promise<void>;
   /** Bring a frame into view and select it, in the part of the board not covered on the right. */

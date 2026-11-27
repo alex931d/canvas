@@ -57,6 +57,7 @@ import type { HistoryAction } from "@/lib/collab/doc";
 import type { PeerDrafts } from "@/lib/collab/peer-drafts";
 import type { Peer } from "@/lib/collab/peers";
 import { subscribeMath, texSource, typesetMath } from "@/lib/math/layout";
+import type { FigurePart } from "@/lib/math/figures";
 import type { MemberFeature } from "@/lib/billing/plan";
 import type { DrawEffect } from "@/lib/preferences";
 import { publishScene, publishView } from "@/lib/canvas/view-bus";
@@ -866,6 +867,48 @@ export function Board({
     return added.length;
   };
 
+  /**
+   * A figure from the math or chemistry tools, as one change that one undo
+   * removes: in the middle of the view (moved down past what's there),
+   * selected, and zoomed out to fit when it's bigger than the view. Frames
+   * in it become the next slides. Returns the new ids.
+   */
+  const insertFigure = (parts: FigurePart[], coveredRight = 0): string[] => {
+    if (readOnly || parts.length === 0) return [];
+    const slides = nextSlide(elementsRef.current);
+    let order = slides.order;
+    const els = parts.map((p) => {
+      const el = { ...p, id: newId() } as CanvasElement;
+      if (el.type === "frame") el.order = order++;
+      return el;
+    });
+    const box = unionRects(els.map(elementBounds));
+    if (!box) return [];
+    const c = camRef.current;
+    // A side panel over the right of the board: centre in what's left.
+    const covered = coveredRight < viewport.w * 0.6 ? coveredRight : 0;
+    const center = { x: c.x + (viewport.w - covered) / 2 / c.z, y: c.y + viewport.h / 2 / c.z };
+    let at = { x: round1(center.x - box.w / 2), y: round1(center.y - box.h / 2) };
+    const boxes = elementsRef.current.filter((e) => e.type !== "eraser").map(elementBounds);
+    for (let i = 0; i < 20; i++) {
+      const placed = padRect({ ...at, w: box.w, h: box.h }, 24);
+      const hit = boxes.find((r) => rectsIntersect(r, placed));
+      if (!hit) break;
+      at = { x: at.x, y: round1(hit.y + hit.h + 48) };
+    }
+    const dx = at.x - box.x;
+    const dy = at.y - box.y;
+    const moved = els.map((el) => translateElement(el, dx, dy));
+    dispatch({ type: "add", elements: moved });
+    setSelected(moved.map((e) => e.id));
+    setLassoRegion(null);
+    setTool("select");
+    const placed = { ...at, w: box.w, h: box.h };
+    const view = { x: c.x, y: c.y, w: (viewport.w - covered) / c.z, h: viewport.h / c.z };
+    if (!rectContainsRect(view, placed)) zoomToRect(padRect(placed, 40), c.z, covered);
+    return moved.map((e) => e.id);
+  };
+
   /** A new frame's box in the frame tool's shape: around `content`, or most of the view around `at`. */
   const frameAround = (at: Point, content: Rect | null): Rect =>
     frameBox(at, content, propsRef.current.style.frameAspect, viewport, camRef.current.z);
@@ -907,6 +950,7 @@ export function Board({
     insertFiles: (files) => void insertFiles(files),
     insertTraced,
     insertMath,
+    insertFigure,
     startMathCheck: () => {
       if (mathCheckLocked) onLocked?.("math-check");
       else if (selected.length > 0 || (lassoRegion && lassoRegion.length > 2)) checkSelection();

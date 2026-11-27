@@ -10,10 +10,12 @@ import {
   FileUp,
   FlaskConical,
   Lock,
+  NotebookPen,
   Play,
   Presentation as PresentationIcon,
   Redo2,
   Share2,
+  Sigma,
   Sparkles,
   Trash2,
   Undo2,
@@ -71,10 +73,13 @@ import { DrawingSync, type PresenceMessage, type SyncStatus } from "@/lib/collab
 import { BrowserDrawingSession, type BrowserSaveState } from "@/lib/local-store/browser-session";
 import { BrowserDrawingMover } from "@/lib/local-store/mover";
 import { LocalDrawingStore, type LocalStatus } from "@/lib/local-store/store";
+import { typesetMath } from "@/lib/math/layout";
 import { DEFAULT_PREFERENCES, type Preferences } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
 import { Board, type BoardHandle, type FlashcardCapture } from "./board";
 import { ChemPanel } from "./chem-panel";
+import { MathPanel, type MathTab } from "./math-tools/math-panel";
+import type { Place } from "./math-tools/shared";
 import { FlashcardDialog } from "./flashcard-dialog";
 import { PeerAvatars } from "./peer-avatars";
 import { Presenter } from "./presenter";
@@ -242,6 +247,8 @@ export function CanvasEditor({
   const selectionRef = useRef<string[]>([]);
   const [panelMessage, setPanelMessage] = useState<string | null>(null);
   const [chemOpen, setChemOpenState] = useState(false);
+  const [mathOpen, setMathOpenState] = useState(false);
+  const [mathTab, setMathTab] = useState<MathTab>("triangle");
   const [searchOpen, setSearchOpen] = useState(false);
   const [slidesOpen, setSlidesOpenState] = useState(false);
   /** A frame to show in the slides panel (its title was double-clicked). */
@@ -251,12 +258,24 @@ export function CanvasEditor({
   // One side panel at a time: they open in the same place.
   const setChemOpen = (open: boolean) => {
     setChemOpenState(open);
-    if (open) setSlidesOpenState(false);
+    if (open) {
+      setSlidesOpenState(false);
+      setMathOpenState(false);
+    }
+  };
+  const setMathOpen = (open: boolean) => {
+    setMathOpenState(open);
+    if (open) {
+      setSlidesOpenState(false);
+      setChemOpenState(false);
+    }
   };
   const setSlidesOpen = (open: boolean) => {
     setSlidesOpenState(open);
-    if (open) setChemOpenState(false);
-    else setSlideFocus(null);
+    if (open) {
+      setChemOpenState(false);
+      setMathOpenState(false);
+    } else setSlideFocus(null);
   };
   const [shareOpen, setShareOpen] = useState(false);
   const [flashcard, setFlashcard] = useState<FlashcardCapture | null>(null);
@@ -647,7 +666,33 @@ export function CanvasEditor({
   const toggleChemistry = () => {
     if (chemOpen || allow("chemistry")) setChemOpen(!chemOpen);
   };
+  const toggleMath = () => {
+    if (mathOpen || allow("math-tools")) setMathOpen(!mathOpen);
+  };
+  const openMathTab = (tab: MathTab, feature: "math-tools" | "worksheets" = "math-tools") => {
+    if (!allow(feature)) return;
+    setMathTab(tab);
+    setMathOpen(true);
+  };
   const MEMBERS_HINT = "Part of the membership";
+
+  /** A figure from the math or chemistry tools, in the pen colour, onto the canvas. */
+  const place: Place = async (build) => {
+    try {
+      const ink = style.color === "#ffffff" ? "#201f24" : style.color;
+      const parts = await build(ink, async (tex) => {
+        const layout = await typesetMath(tex);
+        return { width: layout.width, height: layout.height };
+      });
+      const panel = document.querySelector("[data-ui=side-panel]")?.getBoundingClientRect();
+      const boardBox = document.querySelector("[data-testid=board]")?.getBoundingClientRect();
+      const covered = panel && boardBox ? Math.max(0, boardBox.right - panel.left) : 0;
+      const ids = boardRef.current?.insertFigure(parts, covered) ?? [];
+      if (ids.length) toast.success("Added to the canvas.", { id: "figure-insert", duration: 2000 });
+    } catch {
+      toast.error("Couldn't load the equation tools. Check your connection and try again.");
+    }
+  };
 
   const updateFrame = (frame: FrameElement, patch: Partial<FrameElement>) =>
     doc.dispatch({ type: "update", elements: [{ ...frame, ...patch }] });
@@ -704,10 +749,26 @@ export function CanvasEditor({
     {
       id: "chemistry",
       label: "Chemistry",
-      hint: locked("chemistry") ? MEMBERS_HINT : "Molar mass, balancing, the periodic table",
-      words: "chem elements molar",
+      hint: locked("chemistry") ? MEMBERS_HINT : "Molar mass, balancing, amounts, gas laws, pH",
+      words: "chem elements molar stoichiometry limiting reagent gas law molarity dilution ph",
       Icon: FlaskConical,
       run: () => allow("chemistry") && setChemOpen(true),
+    },
+    {
+      id: "math-tools",
+      label: "Math tools",
+      hint: locked("math-tools") ? MEMBERS_HINT : "Solve triangles, exact trig values, two-column proofs",
+      words: "geometry trigonometry triangle unit circle sin cos tan proof theorem",
+      Icon: Sigma,
+      run: () => openMathTab(mathTab === "worksheet" ? "triangle" : mathTab),
+    },
+    {
+      id: "worksheet",
+      label: "Make a worksheet",
+      hint: locked("worksheets") ? MEMBERS_HINT : "From this drawing's equations or a topic, with an answer key",
+      words: "print practice problems homework pdf answer key",
+      Icon: NotebookPen,
+      run: () => openMathTab("worksheet", "worksheets"),
     },
     {
       id: "share",
@@ -973,9 +1034,29 @@ export function CanvasEditor({
 
           <Tip
             content={
+              locked("math-tools")
+                ? "The geometry, trig, proof and worksheet tools are part of the membership"
+                : "Triangles, exact trig values, two-column proofs and worksheets"
+            }
+          >
+            <Button
+              variant="light"
+              className={cn(BAR_BUTTON, "max-sm:hidden")}
+              onClick={toggleMath}
+              aria-label="Math tools"
+              aria-pressed={mathOpen}
+              data-testid="math-tools-button"
+            >
+              <Sigma /> <span className="max-xl:hidden">Math</span>
+              {locked("math-tools") ? <Lock className="size-3.5 opacity-60 max-xl:hidden" aria-label="Members" /> : null}
+            </Button>
+          </Tip>
+
+          <Tip
+            content={
               locked("chemistry")
                 ? "The chemistry tools are part of the membership"
-                : "Molar mass, balancing equations and the periodic table"
+                : "Molar mass, balancing, amounts, gas laws, solutions and the periodic table"
             }
           >
             <Button
@@ -990,7 +1071,7 @@ export function CanvasEditor({
             </Button>
           </Tip>
 
-          {/* Phones: Share, Export and Chemistry share one menu, so the title has room. */}
+          {/* Phones: Share, Export, Math and Chemistry share one menu, so the title has room. */}
           <Menu>
             <MenuTrigger asChild>
               <Button variant="light" className={cn(BAR_BUTTON, "sm:hidden")} aria-label="More">
@@ -1004,6 +1085,10 @@ export function CanvasEditor({
               </MenuItem>
               <MenuItem onSelect={() => setSlidesOpen(!slidesOpen)}>
                 <PresentationIcon /> {slidesOpen ? "Close slides" : "Slides"}
+              </MenuItem>
+              <MenuItem onSelect={toggleMath}>
+                <Sigma /> {mathOpen ? "Close math tools" : "Math tools"}
+                {locked("math-tools") ? <Lock className="ml-auto size-3.5 opacity-60" aria-label="Members" /> : null}
               </MenuItem>
               <MenuItem onSelect={toggleChemistry}>
                 <FlaskConical /> {chemOpen ? "Close chemistry" : "Chemistry"}
@@ -1107,9 +1192,22 @@ export function CanvasEditor({
         </div>
       </main>
 
+      <MathPanel
+        open={mathOpen}
+        onOpenChange={setMathOpen}
+        tab={mathTab}
+        onTabChange={setMathTab}
+        place={place}
+        canInsert={ready && !readOnly}
+        elements={elements}
+        getSelection={() => selectionRef.current}
+        title={title}
+      />
+
       <ChemPanel
         open={chemOpen}
         onOpenChange={setChemOpen}
+        place={place}
         canInsert={ready && !readOnly}
         onInsert={async (value) => {
           try {

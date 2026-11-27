@@ -31,7 +31,7 @@ import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
   title: "Pricing",
-  description: `Draw for free in your browser, no account needed. The membership, ${MEMBERSHIP.price} ${MEMBERSHIP.per}, keeps your drawings in your account and adds math checks, chemistry tools, flashcards and drawing together.`,
+  description: `Draw for free in your browser, no account needed. The membership, ${MEMBERSHIP.price} ${MEMBERSHIP.per}, keeps your drawings in your account and adds math checks, geometry and proof tools, worksheets, chemistry tools, flashcards and drawing together.`,
 };
 
 type Viewer =
@@ -221,7 +221,7 @@ const QUESTIONS = [
   },
   {
     q: "What does the membership add?",
-    a: "Your drawings kept in your account, on every device you sign in on; step-by-step math checks; the chemistry tools; flashcards; drawing live with others; team workspaces; and study buddies that keep your streak.",
+    a: "Your drawings kept in your account, on every device you sign in on; step-by-step math checks; the geometry, trig and proof tools; worksheets with answer keys; the chemistry tools; flashcards; drawing live with others; team workspaces; and study buddies that keep your streak.",
   },
   {
     q: "What happens to my drawings when I join?",

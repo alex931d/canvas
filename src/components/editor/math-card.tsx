@@ -1,13 +1,10 @@
 "use client";
 
-import "katex/dist/katex.min.css";
-
-import katex from "katex";
 import { CircleCheck, CircleQuestionMark, CircleX, NotebookPen, RotateCcw, Sparkles, X } from "lucide-react";
-import { useMemo } from "react";
 import { Badge, Button, Skeleton, type BadgeTone } from "@/components/kit";
 import type { MathCheck } from "@/lib/ai/math-check-schema";
 import { cn } from "@/lib/utils";
+import { Tex } from "./tex";
 
 export type MathState =
   | { status: "loading" }
@@ -22,21 +19,6 @@ const VERDICT: Record<MathCheck["verdict"], { label: string; tone: BadgeTone }> 
   unreadable: { label: "Couldn't read it", tone: "neutral" },
 };
 
-/** KaTeX output is safe to inject: trust is off, so no links or raw HTML. */
-function Tex({ latex, display = false, className }: { latex: string; display?: boolean; className?: string }) {
-  const html = useMemo(
-    () =>
-      katex.renderToString(latex, {
-        displayMode: display,
-        throwOnError: false,
-        strict: "ignore",
-        trust: false,
-        output: "html",
-      }),
-    [latex, display],
-  );
-  return <span className={cn("[&_.katex]:text-[1.05em]", className)} dangerouslySetInnerHTML={{ __html: html }} />;
-}
 
 export function MathCard({
   state,

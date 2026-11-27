@@ -134,6 +134,14 @@ const mathStatus = await page.evaluate(() =>
   ),
 );
 check("math checks answer 402 for non-members", mathStatus === 402, String(mathStatus));
+const aiStatuses = await page.evaluate(() =>
+  Promise.all(
+    ["/api/check-proof", "/api/worksheet"].map((u) =>
+      fetch(u, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).then((r) => r.status),
+    ),
+  ),
+);
+check("so do proof checks and worksheets", aiStatuses.join() === "402,402", aiStatuses.join());
 
 // ------------------------------------------------------------ leaving checkout without paying
 await clickAndWait(page, button("Start membership"));
