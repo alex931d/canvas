@@ -239,7 +239,7 @@ export async function inviteToWorkspace(workspaceId: string, email: string, role
         role: parsedRole.data,
         link: `${origin}/join/workspace/${token}`,
       }),
-    });
+    }, { priority: "normal", kind: "workspace invite" });
   });
 }
 

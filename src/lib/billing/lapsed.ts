@@ -104,7 +104,7 @@ async function emailAbout(kind: "ended" | "reminder", userId: string, deleteAfte
     homeLink: site ? `${site}/` : null,
   });
   try {
-    await sendEmail({ to: user.email, ...message });
+    await sendEmail({ to: user.email, ...message }, { priority: "bulk", kind: kind === "ended" ? "membership ended" : "deletion reminder" });
     return true;
   } catch (err) {
     console.error(`[storage] couldn't send the ${kind} email to ${user.email}:`, err);

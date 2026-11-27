@@ -62,7 +62,7 @@ export async function sendPasswordResetLink(email: string, origin: string | null
     .delete(passwordResetTokens)
     .where(and(eq(passwordResetTokens.userId, user.id), lte(passwordResetTokens.expiresAt, sql`now()`)));
 
-  await sendEmail({ to: user.email, ...passwordResetEmail({ name: user.name, link: `${origin}/reset-password/${token}` }) });
+  await sendEmail({ to: user.email, ...passwordResetEmail({ name: user.name, link: `${origin}/reset-password/${token}` }) }, { priority: "urgent", kind: "password reset" });
   return "sent";
 }
 

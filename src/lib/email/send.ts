@@ -1,58 +1,45 @@
 import "server-only";
 
 import { after } from "next/server";
-import { createTransport } from "nodemailer";
+import { awaitDelivery, queueEmail, type DeliveryResult, type QueueOptions } from "./queue";
+import type { Email } from "./transport";
 
 /*
- * Sending email. With SMTP_URL set, mail goes out through that server (any
- * provider with SMTP works: Resend, Postmark, Brevo, Amazon SES, Gmail…).
- * Without it, each email is printed to the server's console instead, so
- * sign-up and password resets still work while you develop.
+ * Sending email: everything goes through the queue (src/lib/email/queue.ts),
+ * which sends the most urgent mail first and retries failures. Each email
+ * says how urgent it is and what it is:
+ *
+ *   sendEmail(email, { priority: "security", kind: "two-factor on" })
  */
 
-export type Email = { to: string; subject: string; text: string; html: string };
+export type { Email };
+export { EMAIL_PRIORITY, type EmailPriority } from "./queue";
 
-let transport: ReturnType<typeof createTransport> | null | undefined;
-let warned = false;
-
-function smtp() {
-  if (transport === undefined) {
-    const url = process.env.SMTP_URL?.trim();
-    transport = url ? createTransport(url) : null;
-  }
-  return transport;
+/** Queue an email; resolves once it's safely stored. */
+export async function sendEmail(email: Email, options: QueueOptions): Promise<void> {
+  await queueEmail(email, options);
 }
 
-export async function sendEmail(email: Email): Promise<void> {
-  const server = smtp();
-  if (!server) {
-    if (!warned && process.env.NODE_ENV === "production") {
-      warned = true;
-      console.warn("[email] SMTP_URL isn't set, so emails are printed here instead of sent. Set it before people sign up.");
+/**
+ * Queue once the response has gone out, so the page never waits on the
+ * database for it and its timing can't tell anyone whether an account
+ * exists. Failures to queue are logged.
+ */
+export function sendEmailLater(email: Email, options: QueueOptions) {
+  after(async () => {
+    try {
+      await queueEmail(email, options);
+    } catch (err) {
+      console.error(`[email] couldn't queue "${options.kind}" to ${email.to}:`, err);
     }
-    console.info(`[email] To: ${email.to}\n[email] Subject: ${email.subject}\n\n${email.text}\n`);
-    return;
-  }
-  await server.sendMail({
-    from: process.env.EMAIL_FROM?.trim() || "canvas <no-reply@localhost>",
-    to: email.to,
-    subject: email.subject,
-    text: email.text,
-    html: email.html,
   });
 }
 
 /**
- * Send once the response has gone out, so the page never waits on the mail
- * server and its timing can't tell anyone whether an account exists.
- * Failures are logged.
+ * Queue and wait (up to 10 s) to hear how it went, for when the page should
+ * say if it didn't send (a code someone asked for again). "failed" means it
+ * was taken out of the queue; "queued" means it's still on its way.
  */
-export function sendEmailLater(email: Email) {
-  after(async () => {
-    try {
-      await sendEmail(email);
-    } catch (err) {
-      console.error(`[email] couldn't send "${email.subject}" to ${email.to}:`, err);
-    }
-  });
+export async function sendEmailAndWait(email: Email, options: QueueOptions): Promise<DeliveryResult> {
+  return awaitDelivery(await queueEmail(email, options));
 }
