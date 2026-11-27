@@ -143,6 +143,6 @@ export async function setNewPassword(_prev: ResetState, formData: FormData): Pro
       email: user.email,
       resetLink: origin ? `${origin}/forgot-password` : null,
     }),
-  });
+  }, { priority: "security", kind: "password changed" });
   redirect(twoFactor ? twoFactorPath("/") : await landingFor(user.id));
 }

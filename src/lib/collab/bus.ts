@@ -6,6 +6,7 @@ import type Redis from "ioredis";
 import { Client } from "pg";
 import { db } from "@/db";
 import { getRedis } from "@/lib/redis";
+import { redisUrl } from "@/lib/redis-url";
 import type { HubMessage } from "./notify";
 
 /**
@@ -49,11 +50,11 @@ interface Transport {
 
 function chooseKind(): BusKind {
   const asked = process.env.REALTIME_BUS?.trim().toLowerCase();
-  const hasRedis = Boolean(process.env.REDIS_URL?.trim());
+  const hasRedis = redisUrl() !== null;
   if (asked === "local" || asked === "postgres") return asked;
   if (asked === "redis") {
     if (hasRedis) return "redis";
-    console.warn("[bus] REALTIME_BUS=redis but REDIS_URL isn't set: using postgres.");
+    console.warn("[bus] REALTIME_BUS=redis but Redis isn't set up (REDIS_URL, or Upstash's REST URL and token): using postgres.");
     return "postgres";
   }
   if (asked) console.warn(`[bus] Unknown REALTIME_BUS "${asked}" (local, redis or postgres): using the default.`);

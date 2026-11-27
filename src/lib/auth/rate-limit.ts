@@ -27,7 +27,7 @@ const redis = getRedis();
 
 if (!redis && process.env.NODE_ENV === "production" && process.env.NEXT_PHASE !== "phase-production-build") {
   console.warn(
-    "[rate-limit] REDIS_URL isn't set, so rate limits are kept in each server's memory. Set REDIS_URL in production.",
+    "[rate-limit] Redis isn't set up, so rate limits are kept in each server's memory. Set REDIS_URL (or Upstash's UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN) in production.",
   );
 }
 

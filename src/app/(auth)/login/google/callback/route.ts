@@ -125,5 +125,5 @@ async function tellLinked(user: { name: string; email: string }, googleEmail: st
       googleEmail,
       resetLink: origin ? `${origin}/forgot-password` : null,
     }),
-  });
+  }, { priority: "security", kind: "Google linked" });
 }

@@ -25,6 +25,7 @@ import { PAGE_SIZE, searchUsers, userDetail, userStats, type MembershipLabel, ty
 import { can, canManage, roleChangeBlocked, ROLE_INFO, type Role } from "@/lib/auth/roles";
 import { requirePermission, type SessionUser } from "@/lib/auth/session";
 import { THEME_INFO } from "@/lib/seasons";
+import { queueStats } from "@/lib/email/queue";
 import { readSeasonalSetting, readWildSetting } from "@/lib/site/settings";
 import { cn } from "@/lib/utils";
 
@@ -74,12 +75,13 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/admin">["
   const actor = await requirePermission("admin:open");
   const query = parseAdminQuery(await searchParams);
   const siteSettings = can(actor.role, "site:settings");
-  const [stats, results, detail, seasonal, wild] = await Promise.all([
+  const [stats, results, detail, seasonal, wild, emails] = await Promise.all([
     userStats(),
     searchUsers(query),
     query.user ? userDetail(query.user) : null,
     siteSettings ? readSeasonalSetting() : null,
     siteSettings ? readWildSetting() : null,
+    siteSettings ? queueStats() : null,
   ]);
   // Past the last page (say, after a search narrowed things): show the last one, and say so in the address.
   if (query.page > results.pageCount) redirect(adminHref(query, { page: results.pageCount }));
@@ -110,6 +112,7 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/admin">["
           </header>
 
           <StatusCards stats={stats} query={query} />
+          {emails ? <EmailQueue stats={emails} /> : null}
 
           <section aria-labelledby="accounts-title" className="mt-8 rounded-xl bg-white p-4 sm:p-6">
             <h2 id="accounts-title" className="sr-only">
@@ -209,6 +212,32 @@ const CARDS: { status: Status | null; label: string; key: "accounts" | "members"
 ];
 
 /** The totals, which double as filters. */
+/** How the email queue stands (src/lib/email/queue.ts): waiting now, and sent and failed in the last day. */
+function EmailQueue({ stats }: { stats: Awaited<ReturnType<typeof queueStats>> }) {
+  return (
+    <section
+      aria-label="Email queue"
+      data-testid="email-queue"
+      className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-1 rounded-xl bg-white px-5 py-3 text-sm"
+    >
+      <span className="font-bold">Email</span>
+      <span className="tabular-nums">
+        {stats.queued} waiting
+        {stats.oldestQueued ? (
+          <span className="text-grey-500">
+            {" "}
+            (oldest due <LocalTime iso={stats.oldestQueued.toISOString()} />)
+          </span>
+        ) : null}
+      </span>
+      <span className="tabular-nums text-grey-500">{stats.sent} sent today</span>
+      <span className={cn("tabular-nums", stats.failed ? "font-bold text-destructive" : "text-grey-500")}>
+        {stats.failed} failed today
+      </span>
+    </section>
+  );
+}
+
 function StatusCards({ stats, query }: { stats: Awaited<ReturnType<typeof userStats>>; query: AdminQuery }) {
   return (
     <nav aria-label="Filter by status" className="grid grid-cols-2 gap-3 lg:grid-cols-4">

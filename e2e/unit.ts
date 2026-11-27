@@ -52,6 +52,7 @@ import { afterReview, levelUp } from "../src/lib/buddy/lines";
 import { accessoriesFor, DEFAULT_SETTINGS, levelFor, settingsSchema, streakFrom, type Progress } from "../src/lib/buddy/shared";
 import { CollabDoc, type RemoteChange } from "../src/lib/collab/doc";
 import { canUse, MEMBER_FEATURES } from "../src/lib/billing/plan";
+import { redisUrl } from "../src/lib/redis-url";
 import { applyOps, type DocOp } from "../src/lib/collab/ops";
 import { compileExpression, ExprError, formatTick, niceStep } from "../src/lib/math/expr";
 import { easterSunday, resolveTheme, themeForDate } from "../src/lib/seasons";
@@ -283,6 +284,27 @@ Free.confirmLocal(Free.unsent().map((b) => b.id));
 eq("with nothing pending, the saved copy is what's shown", [Free.serverElements === Free.elements, Free.getSnapshot().unsynced], [true, 0]);
 Free.dispatch({ type: "undo" });
 eq("undo still works after saving", ids(Free.elements), "basel1l2");
+// ------------------------------------------------ where Redis is
+eq("REDIS_URL is used as is", redisUrl({ REDIS_URL: " redis://localhost:6379 " }), "redis://localhost:6379");
+eq(
+  "Upstash's REST URL and token make a TLS connection with the token as password",
+  redisUrl({ UPSTASH_REDIS_REST_URL: "https://example-123.upstash.io", UPSTASH_REDIS_REST_TOKEN: "abc/+=" }),
+  "rediss://default:abc%2F%2B%3D@example-123.upstash.io:6379",
+);
+eq(
+  "REDIS_URL wins over Upstash's",
+  redisUrl({ REDIS_URL: "redis://a:1", UPSTASH_REDIS_REST_URL: "https://b.upstash.io", UPSTASH_REDIS_REST_TOKEN: "t" }),
+  "redis://a:1",
+);
+eq("a URL without its token is nothing", redisUrl({ UPSTASH_REDIS_REST_URL: "https://b.upstash.io" }), null);
+eq(
+  "on the VPS, Upstash's wins over the bundled Redis, which is used otherwise",
+  [
+    redisUrl({ BUNDLED_REDIS_URL: "redis://redis:6379", UPSTASH_REDIS_REST_URL: "b.upstash.io", UPSTASH_REDIS_REST_TOKEN: "t" }),
+    redisUrl({ BUNDLED_REDIS_URL: "redis://redis:6379" }),
+  ],
+  ["rediss://default:t@b.upstash.io:6379", "redis://redis:6379"],
+);
 // ------------------------------------------------ plans
 eq(
   "only members can use member features",

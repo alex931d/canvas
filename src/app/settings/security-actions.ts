@@ -86,7 +86,7 @@ export async function confirmTwoFactor(_prev: CodesState, formData: FormData): P
   }
   // Anyone else who was signed in has to log in again, now with a code.
   await invalidateOtherSessions(me.user.id, me.session.id);
-  sendEmailLater({ to: me.user.email, ...twoFactorOnEmail({ ...me.user, resetLink: await resetLink() }) });
+  sendEmailLater({ to: me.user.email, ...twoFactorOnEmail({ ...me.user, resetLink: await resetLink() }) }, { priority: "security", kind: "two-factor on" });
   refresh(); // the codes stay on screen (client state); the page behind them now says it's on
   return { recoveryCodes: result.recoveryCodes.map(formatRecoveryCode) };
 }
@@ -98,7 +98,7 @@ export async function disableTwoFactor(_prev: CodesState, formData: FormData): P
   const check = await currentCode(me.user.id, formData);
   if (check) return { error: check };
   await turnOff(me.user.id);
-  sendEmailLater({ to: me.user.email, ...twoFactorOffEmail({ ...me.user, byStaff: false, resetLink: await resetLink() }) });
+  sendEmailLater({ to: me.user.email, ...twoFactorOffEmail({ ...me.user, byStaff: false, resetLink: await resetLink() }) }, { priority: "security", kind: "two-factor off" });
   refresh();
   return { ok: "Two-factor sign-in is off." };
 }

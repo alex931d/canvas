@@ -7,6 +7,9 @@
 //
 //   GET    /messages?to=a@b.c   → [{ to, from, subject, text, html, at }], oldest first
 //   DELETE /messages            → empty the inbox
+//
+// Addresses starting busy-once+ are refused with 451 (try again later) the
+// first time; addresses starting nobody+ are refused with 550 (no such mailbox).
 import { createServer as createTcpServer } from "node:net";
 import { createServer as createHttpServer } from "node:http";
 
@@ -14,6 +17,7 @@ const SMTP_PORT = Number(process.env.MOCK_SMTP_PORT ?? 2525);
 const INBOX_PORT = Number(process.env.MOCK_INBOX_PORT ?? 2526);
 
 let messages = [];
+const busyOnce = new Set();
 
 // ------------------------------------------------------------ MIME, just enough
 
@@ -130,8 +134,17 @@ createTcpServer((socket) => {
         from = /<([^>]*)>/.exec(line)?.[1] ?? "";
         reply("250 OK");
       } else if (verb === "RCPT") {
-        recipients.push((/<([^>]*)>/.exec(line)?.[1] ?? "").toLowerCase());
-        reply("250 OK");
+        const to = (/<([^>]*)>/.exec(line)?.[1] ?? "").toLowerCase();
+        // Test addresses: busy-once+… is refused for now the first time (try later), nobody+… doesn't exist.
+        if (to.startsWith("busy-once+") && !busyOnce.has(to)) {
+          busyOnce.add(to);
+          reply("451 4.3.0 Mailbox busy, try again later");
+        } else if (to.startsWith("nobody+")) {
+          reply("550 5.1.1 No such mailbox");
+        } else {
+          recipients.push(to);
+          reply("250 OK");
+        }
       } else if (verb === "DATA") {
         inData = true;
         reply("354 End data with <CR><LF>.<CR><LF>");

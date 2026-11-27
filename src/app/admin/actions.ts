@@ -226,7 +226,7 @@ export async function disableUserTwoFactor(_prev: AdminActionState, formData: Fo
   sendEmailLater({
     to: user.email,
     ...twoFactorOffEmail({ name: user.name, email: user.email, byStaff: true, resetLink: origin ? `${origin}/forgot-password` : null }),
-  });
+  }, { priority: "security", kind: "two-factor off (staff)" });
   refresh();
   return { ok: "Turned off their two-factor sign-in, and emailed them." };
 }

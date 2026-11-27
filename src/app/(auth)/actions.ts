@@ -156,7 +156,7 @@ export async function verifyTwoFactorLogin(_prev: TwoFactorState, formData: Form
         left: result.recoveryCodesLeft,
         resetLink: origin ? `${origin}/forgot-password` : null,
       }),
-    });
+    }, { priority: "security", kind: "recovery code used" });
   }
   if (!user.emailVerified) redirect(verifyEmailPath(next));
   redirect(next);

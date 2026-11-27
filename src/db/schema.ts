@@ -4,6 +4,7 @@ import type { Outcome } from "@/lib/buddy/battle";
 import type { Ability, Rarity } from "@/lib/buddy/kinds";
 import {
   bigint,
+  bigserial,
   boolean,
   check,
   customType,
@@ -12,6 +13,7 @@ import {
   jsonb,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -106,6 +108,42 @@ export const userPreferences = pgTable("user_preferences", {
     .defaultNow()
     .$onUpdate(() => new Date()),
 }).enableRLS();
+
+/**
+ * Emails waiting to go out, most urgent first (src/lib/email/queue.ts). A
+ * worker on the server claims one at a time, ordered by `priority` (0 is
+ * most urgent: sign-in codes and password resets), then by when it's due,
+ * then by age; failed sends are tried again later. The message (subject,
+ * text and HTML) is kept encrypted with ENCRYPTION_KEY while it waits, since
+ * it can hold sign-in codes and reset links, and erased once sent.
+ */
+export const emailJobs = pgTable(
+  "email_jobs",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    toAddress: text("to_address").notNull(),
+    /** What it is, for the admin page and logs ("sign-in code", "workspace invite"…). */
+    kind: text("kind").notNull(),
+    priority: smallint("priority").notNull(),
+    /** queued, sending, sent, failed or cancelled. */
+    status: text("status").notNull().default("queued"),
+    /** The message as JSON, encrypted when ENCRYPTION_KEY is set (see `sealed`); null once sent. */
+    body: bytea("body"),
+    sealed: boolean("sealed").notNull().default(false),
+    attempts: integer("attempts").notNull().default(0),
+    runAfter: timestamp("run_after", { withTimezone: true }).notNull().defaultNow(),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("email_jobs_next_idx")
+      .on(t.priority, t.runAfter, t.id)
+      .where(sql`${t.status} = 'queued'`),
+    index("email_jobs_status_idx").on(t.status, t.createdAt),
+  ],
+).enableRLS();
 
 /**
  * Server space held by someone whose membership has ended: their drawings

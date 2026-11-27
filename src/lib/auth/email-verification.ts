@@ -6,7 +6,7 @@ import { constantTimeEqual } from "@oslojs/crypto/subtle";
 import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { emailVerificationCodes, users } from "@/db/schema";
-import { sendEmail, sendEmailLater } from "@/lib/email/send";
+import { sendEmailAndWait, sendEmailLater } from "@/lib/email/send";
 import { verificationEmail } from "@/lib/email/templates";
 import { emailLinkOrigin } from "@/lib/site-url";
 import { limiters } from "./rate-limit";
@@ -81,12 +81,14 @@ export async function sendVerificationCode(account: Account, deliver: "now" | "a
   const origin = await emailLinkOrigin();
   const link = origin ? `${origin}/verify-email?code=${code}` : null;
   const email = { to: account.email, ...verificationEmail({ name: account.name, code, link }) };
+  const urgent = { priority: "urgent", kind: "confirmation code" } as const;
   if (deliver === "after-response") {
-    sendEmailLater(email);
+    sendEmailLater(email, urgent);
     return { ok: true };
   }
   try {
-    await sendEmail(email);
+    // Wait to hear it went (it's first in the queue), so a failure can be shown.
+    if ((await sendEmailAndWait(email, urgent)) === "failed") throw new Error("the mail server didn't take it");
     return { ok: true };
   } catch (err) {
     console.error(`[email] couldn't send a confirmation code to ${account.email}:`, err);
