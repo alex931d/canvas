@@ -349,7 +349,39 @@ check("thumbnail saved for the gallery", /^data:image\/(webp|png)/.test(thumb), 
 const bad = await page.evaluate(async () => (await fetch("/api/check-math", { method: "POST", body: "{}", headers: { "Content-Type": "application/json" } })).status);
 check("check-math rejects a bad request", bad === 400);
 
-// Expected: blocked POSTs while "offline", and the deliberate bad request above.
+// An overloaded AI provider (503 "high demand"): retried, then the fallback model, then a clear message.
+const AI_MOCK = (process.env.AI_BASE_URL ?? "http://localhost:4010/v1").replace(/\/v1$/, "");
+const busyAi = (opts) => fetch(`${AI_MOCK}/__test/busy`, { method: "POST", body: JSON.stringify(opts) });
+const askAi = () =>
+  page.evaluate(async () => {
+    const c = document.createElement("canvas");
+    c.width = c.height = 8;
+    const res = await fetch("/api/check-math", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image: c.toDataURL("image/png") }),
+    });
+    return { status: res.status, body: await res.json().catch(() => ({})) };
+  });
+await busyAi({ times: 2 });
+const retried = await askAi();
+check("a briefly overloaded AI is asked again", retried.status === 200 && !!retried.body.verdict, JSON.stringify(retried).slice(0, 120));
+if (process.env.AI_FALLBACK_MODEL) {
+  await busyAi({ times: 99, model: process.env.AI_MODEL ?? "mock-vision" });
+  const fellBack = await askAi();
+  const lastModel = JSON.parse(readFileSync("/tmp/mock-ai-last.json", "utf8")).model;
+  check(
+    "when it stays overloaded, the fallback model answers",
+    fellBack.status === 200 && lastModel === process.env.AI_FALLBACK_MODEL,
+    `${fellBack.status} ${lastModel}`,
+  );
+}
+await busyAi({ times: 99 });
+const busy = await askAi();
+check("and if nothing answers, the student is told it's busy", busy.status === 503 && /busy/.test(busy.body.error ?? ""), JSON.stringify(busy).slice(0, 160));
+await busyAi({ times: 0 });
+
+// Expected: blocked POSTs while "offline", the deliberate bad request and the overloaded AI above.
 const real = errors.filter((e) => !/ERR_FAILED|Failed to fetch|net::ERR|400 \(Bad Request\)/.test(e));
 console.log("\nerrors:", real.length ? real : "none");
 await browser.close();

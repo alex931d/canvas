@@ -138,6 +138,12 @@ The checker uses the OpenAI-compatible chat API, so you can switch providers in 
 
 Without a key, everything else works and **Check math** explains how to set it up.
 
+Providers are sometimes briefly overloaded (Gemini answers 503 "high demand" at busy times). The
+checker asks again twice, a second and then three seconds later (or after the provider's
+`Retry-After`), and then, if you set `AI_FALLBACK_MODEL` to a second model on the same provider, asks
+that one the same way. If nothing answers, the student is told the checker is busy and to try again
+in a minute.
+
 ## Scripts
 
 | Script | What it does |
@@ -1327,7 +1333,7 @@ node e2e/mock-stripe.mjs &                               # stand-in Stripe on :1
 node e2e/mock-turnstile.mjs &                            # stand-in Turnstile on :4030
 node e2e/mock-mail.mjs &                                 # SMTP on :2525, inbox on :2526
 node e2e/mock-google.mjs &                               # stand-in Google sign-in on :4040
-AI_BASE_URL=http://localhost:4010/v1 AI_MODEL=mock-vision \
+AI_BASE_URL=http://localhost:4010/v1 AI_MODEL=mock-vision AI_FALLBACK_MODEL=mock-vision-lite \
 STRIPE_API_BASE=http://localhost:12111 STRIPE_SECRET_KEY=sk_test_mock \
 STRIPE_WEBHOOK_SECRET=whsec_mock STRIPE_PRICE_ID=price_mock \
 SMTP_URL=smtp://localhost:2525 \
@@ -1337,7 +1343,7 @@ TURNSTILE_VERIFY_URL=http://localhost:4030/turnstile/v0/siteverify \
 GOOGLE_CLIENT_ID=mock-client.apps.googleusercontent.com GOOGLE_CLIENT_SECRET=mock-google-secret \
 GOOGLE_AUTH_URL=http://localhost:4040/o/oauth2/v2/auth GOOGLE_TOKEN_URL=http://localhost:4040/token \
 STORAGE_SWEEP_SECONDS=2 ENCRYPTION_KEY="$(openssl rand -base64 32)" npm start
-AI_MODEL=mock-vision npm run test:e2e                    # in another terminal
+AI_MODEL=mock-vision AI_FALLBACK_MODEL=mock-vision-lite npm run test:e2e                    # in another terminal
 ```
 
 They pass with or without `REDIS_URL`; with it (e.g. `docker compose up -d` and
@@ -1408,10 +1414,11 @@ Google, it checks the client secret, the redirect URI and the PKCE verifier. `GO
   addresses (and no email), the 256-bit token stored as SHA-256, weak and mismatched passwords,
   signing out everywhere, the old password failing and the new one working, the "password changed"
   email, used and expired links, a squatted address taken back, and the 3-emails-per-address limit.
-- `e2e/test.mjs` (35 checks): every tool; select, move, delete and undo, and the outbox holding them
+- `e2e/test.mjs` (38 checks): every tool; select, move, delete and undo, and the outbox holding them
   while the server is unreachable; the stroke eraser; zoom and pan past the first screen; pasted and
-  dropped screenshots (IndexedDB, upload, serving); the lasso math check against the mock AI; offline
-  edits restored in a new tab.
+  dropped screenshots (IndexedDB, upload, serving); the lasso math check against the mock AI, and an
+  overloaded AI (asked again, then the fallback model, then "busy"); offline edits restored in a new
+  tab.
 - `e2e/test-quota.mjs` (17 checks): squeezes the site's quota through the Chrome DevTools Protocol and
   walks the whole fallback chain, including pasting an image when nothing fits locally.
 - `e2e/test-trace.mjs` (28 checks): Trace a picture with a shaded, grainy photo of a fraction and a
