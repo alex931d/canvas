@@ -499,7 +499,9 @@ menu; anyone without a membership who opens it goes to `/pricing`.
 1. Create a Stripe account and copy the test-mode secret key (`sk_test_...`) into `.env.local` as
    `STRIPE_SECRET_KEY`.
 2. `npm run stripe:setup` creates the product and the $5/month price and prints `STRIPE_PRICE_ID`.
-   Running it again finds the same price.
+   Running it again finds the same price. The product gets the tax code `txcd_10103000` (Software as
+   a service, personal use): Stripe requires one for Checkout when Managed Payments is on, which it
+   is by default on new accounts, and the script adds it to a product made without one.
 3. In the Stripe Dashboard, open **Settings → Billing → Customer portal** and save it once, so the
    billing portal works. Choose what members can do there (cancel, update card, see invoices).
 4. Webhooks, locally: install the [Stripe CLI](https://docs.stripe.com/stripe-cli) and run
