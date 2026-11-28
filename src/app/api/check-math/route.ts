@@ -2,14 +2,16 @@ import { z } from "zod";
 import { checkMath, MathCheckError } from "@/lib/ai/check-math";
 import { limiters } from "@/lib/auth/rate-limit";
 import { getCurrentSession } from "@/lib/auth/session";
+import { withAiAllowance } from "@/lib/billing/ai-quota";
 import { membershipRequiredResponse } from "@/lib/billing/membership";
 
 /**
  * POST { image: "data:image/png;base64,..." } -> MathCheck JSON.
  * The browser renders the selected region of the canvas to an image first.
  *
- * It spends your AI quota, so it needs a signed-in member and is rate limited
- * per user (10 checks, then one every 30 seconds).
+ * It spends your AI quota, so it needs a signed-in member, is rate limited
+ * per user (10 checks, then one every 30 seconds) and counts against the
+ * membership's monthly AI allowance (src/lib/billing/ai-allowance.ts).
  */
 
 const bodySchema = z.object({
@@ -38,14 +40,16 @@ export async function POST(request: Request) {
     return Response.json({ error: parsed.error.issues[0]?.message ?? "Invalid body" }, { status: 400 });
   }
 
-  try {
-    const result = await checkMath(parsed.data.image);
-    return Response.json(result);
-  } catch (err) {
-    if (err instanceof MathCheckError) {
-      return Response.json({ error: err.message }, { status: err.status });
+  return withAiAllowance(user.id, async () => {
+    try {
+      const result = await checkMath(parsed.data.image);
+      return Response.json(result);
+    } catch (err) {
+      if (err instanceof MathCheckError) {
+        return Response.json({ error: err.message }, { status: err.status });
+      }
+      console.error("[check-math]", err);
+      return Response.json({ error: "Checking failed unexpectedly." }, { status: 500 });
     }
-    console.error("[check-math]", err);
-    return Response.json({ error: "Checking failed unexpectedly." }, { status: 500 });
-  }
+  });
 }

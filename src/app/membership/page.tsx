@@ -14,6 +14,8 @@ import { LocalDate } from "@/components/local-time";
 import { Badge, Button, Skeleton } from "@/components/kit";
 import type { SessionUser } from "@/lib/auth/session";
 import { requireUser } from "@/lib/auth/session";
+import type { AiAllowance } from "@/lib/billing/ai-allowance";
+import { getAiAllowance } from "@/lib/billing/ai-quota";
 import { readMembership, type Membership } from "@/lib/billing/membership";
 import { MEMBERSHIP } from "@/lib/billing/plan";
 import { stripe } from "@/lib/billing/stripe";
@@ -74,10 +76,11 @@ async function MembershipCard({ searchParams }: { searchParams: PageProps<"/memb
   if (checkout === "success" && typeof session_id === "string") await confirmCheckout(user, session_id);
   const membership = await readMembership(user.id);
   if (!membership.isMember && checkout !== "success") redirect("/pricing");
+  const ai = membership.isMember ? await getAiAllowance(user.id) : null;
 
   return (
     <>
-      {membership.isMember ? <MemberView membership={membership} welcome={checkout === "success"} /> : <Confirming />}
+      {membership.isMember ? <MemberView membership={membership} welcome={checkout === "success"} ai={ai} /> : <Confirming />}
       {/* A picture or effect choices kept in this browser before joining go into the account. */}
       {membership.isMember ? <MoveBrowserProfile userId={user.id} /> : null}
       <p className="mt-8 border-t pt-5 text-center text-sm text-grey-500">
@@ -102,7 +105,7 @@ function Confirming() {
   );
 }
 
-function MemberView({ membership, welcome }: { membership: Membership; welcome: boolean }) {
+function MemberView({ membership, welcome, ai }: { membership: Membership; welcome: boolean; ai: AiAllowance | null }) {
   const sub = membership.subscription!;
   const ending = sub.cancelAt !== null;
   const pastDue = sub.status === "past_due";
@@ -142,6 +145,8 @@ function MemberView({ membership, welcome }: { membership: Membership; welcome: 
         )}
       </p>
 
+      {ai ? <AiAllowanceMeter ai={ai} /> : null}
+
       {/* Drawings made in this browser on the free plan go into the account now (and on the home page later). */}
       {welcome ? <WelcomeMove className="mt-6 mb-0 bg-beige-100 sm:mb-0" /> : null}
 
@@ -157,5 +162,35 @@ function MemberView({ membership, welcome }: { membership: Membership; welcome: 
         </p>
       )}
     </>
+  );
+}
+
+/** How much of this month's AI allowance (math checks, proof checks, worksheets) is used. */
+function AiAllowanceMeter({ ai }: { ai: AiAllowance }) {
+  const share = ai.limit ? Math.min(1, ai.used / ai.limit) : 1;
+  const low = ai.left <= Math.max(10, ai.limit * 0.1);
+  return (
+    <div className="mt-6 rounded-lg bg-beige-100 p-4" data-testid="ai-allowance">
+      <div className="flex items-baseline justify-between gap-3 text-sm">
+        <span className="font-bold">AI checks and worksheets</span>
+        <span className="text-grey-700 tabular-nums">
+          {ai.used} of {ai.limit} used this month
+        </span>
+      </div>
+      <div
+        className="mt-2 h-2 overflow-hidden rounded-full bg-beige-300"
+        role="meter"
+        aria-label="AI checks and worksheets used this month"
+        aria-valuemin={0}
+        aria-valuemax={ai.limit}
+        aria-valuenow={ai.used}
+      >
+        <div className={low ? "h-full bg-orange" : "h-full bg-green"} style={{ width: `${share * 100}%` }} />
+      </div>
+      <p className="mt-2 text-xs text-grey-500">
+        {ai.left === 0 ? "All used. " : null}
+        Starts over on <LocalDate iso={ai.resetsAt} />. Math checks, proof checks and AI worksheets each count once.
+      </p>
+    </div>
   );
 }

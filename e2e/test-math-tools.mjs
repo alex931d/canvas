@@ -10,7 +10,7 @@ import nextEnv from "@next/env";
 import { readFileSync } from "node:fs";
 
 nextEnv.loadEnvConfig(process.cwd());
-const { signUp, sql, sleep } = await import("./helpers.mjs");
+const { BASE, signUp, sql, sleep } = await import("./helpers.mjs");
 const CHROME = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 
 let failures = 0;
@@ -37,7 +37,7 @@ const browser = await puppeteer.launch({
 const page = await browser.newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
-page.on("console", (m) => m.type() === "error" && !/status of 4\d\d/.test(m.text()) && errors.push(`console: ${m.text()}`));
+page.on("console", (m) => m.type() === "error" && !/status of (4\d\d|503)/.test(m.text()) && errors.push(`console: ${m.text()}`));
 
 const status = () => page.$eval("[data-testid=storage-status]", (el) => el.innerText.replace(/\s+/g, " ")).catch(() => "");
 const synced = () => waitFor(async () => /Saved here.*Synced/.test(await status()), 10_000);
@@ -138,6 +138,23 @@ check("a proof to start from", (await page.$$("[data-testid=proof-row]")).length
 check("a well formed proof has no issues", !(await page.$("[data-testid=proof-issues]")));
 await (await button("Check with AI")).click();
 check("the AI says it holds", await waitFor(async () => /The proof holds/.test(await textOf("[data-testid=proof-verdict]")), 15_000));
+// The monthly AI allowance: one proof check used, triangles and trig used none.
+const owner = sql(`select user_id from drawings where id='${id}'`);
+const used = () => Number(sql(`select coalesce((select calls from ai_usage where user_id='${owner}'), 0)`));
+check("the check used one of the month's AI calls", used() === 1, String(used()));
+check("the panel says what's left", await waitFor(async () => /249 of 250 AI checks and worksheets left this month/.test(await textOf("[data-testid=ai-left]"))), await textOf("[data-testid=ai-left]"));
+await fetch("http://localhost:4010/__test/busy", { method: "POST", body: JSON.stringify({ times: 20 }) });
+await (await button("Check with AI")).click();
+check("when the AI is busy the check fails", await waitFor(async () => /busy/.test(await panelText()), 40_000), (await panelText()).split("\n").filter((l) => /proof|busy|check|AI/i.test(l)).slice(-4).join(" / "));
+check("and the call is given back", used() === 1, String(used()));
+await fetch("http://localhost:4010/__test/busy", { method: "POST", body: JSON.stringify({ times: 0 }) });
+sql(`update ai_usage set calls = 250 where user_id='${owner}'`);
+await (await button("Check with AI")).click();
+check("with the month's 250 used, it says so", await waitFor(async () => /You've used all 250 AI checks and worksheets for this month\. They start over on/.test(await panelText()), 10_000));
+check("and nothing more is counted", used() === 250);
+sql(`update ai_usage set calls = 1 where user_id='${owner}'`);
+await (await button("Check with AI")).click();
+await waitFor(async () => /The proof holds/.test(await textOf("[data-testid=proof-verdict]")), 15_000);
 const sent = JSON.parse(readFileSync("/tmp/mock-ai-text.json", "utf8"));
 check("it was sent the proof, line by line", /Prove: △ABC ≅ △CDA/.test(sent.user) && /3\. AC ≅ CA \| Reflexive property/.test(sent.user), sent.user.slice(0, 120));
 await fill("[aria-label='Reason 3']", "Because I said so");
@@ -262,6 +279,12 @@ await page.reload({ waitUntil: "load" });
 await synced();
 const all = elements(id);
 check("everything placed is in the drawing", all.filter((e) => e.type === "frame").length >= 2 && all.some((e) => e.type === "ellipse" && e.w === 380));
+
+// The membership page shows the month's allowance.
+const calls = used();
+await page.goto(`${BASE}/membership`, { waitUntil: "load" });
+const meter = await page.waitForSelector("[data-testid=ai-allowance]", { timeout: 10_000 }).then(() => textOf("[data-testid=ai-allowance]")).catch(() => "");
+check("the membership page shows the month's AI use", new RegExp(`${calls} of 250 used this month`).test(meter) && /Starts over on/.test(meter), meter.replace(/\s+/g, " ").slice(0, 120));
 
 check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
 await browser.close();

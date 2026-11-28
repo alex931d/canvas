@@ -54,6 +54,7 @@ import { CollabDoc, type RemoteChange } from "../src/lib/collab/doc";
 import { canUse, MEMBER_FEATURES } from "../src/lib/billing/plan";
 import { redisUrl } from "../src/lib/redis-url";
 import { envValue, redactSecrets } from "../src/lib/env-value";
+import { aiMonthlyLimit, allowance, allowanceResetsAt, allowanceUsedMessage, usageMonth } from "../src/lib/billing/ai-allowance";
 import { parseJsonReply } from "../src/lib/ai/json-reply";
 import { applyOps, type DocOp } from "../src/lib/collab/ops";
 import { compileExpression, ExprError, formatTick, niceStep } from "../src/lib/math/expr";
@@ -307,6 +308,11 @@ eq(
   redisUrl({ REDIS_URL: "redis://a:1", UPSTASH_REDIS_REST_URL: "https://b.upstash.io", UPSTASH_REDIS_REST_TOKEN: "t" }),
   "redis://a:1",
 );
+eq("AI allowance is 250 a month unless set", [aiMonthlyLimit({}), aiMonthlyLimit({ AI_MONTHLY_CALLS: "100" }), aiMonthlyLimit({ AI_MONTHLY_CALLS: "lots" })], [250, 100, 250]);
+eq("calls count against the UTC month", [usageMonth(new Date("2026-11-30T23:59:59Z")), usageMonth(new Date("2026-12-01T00:00:00Z"))], ["2026-11-01", "2026-12-01"]);
+eq("the allowance starts over on the 1st", allowanceResetsAt(new Date("2026-12-15T10:00:00Z")).toISOString(), "2027-01-01T00:00:00.000Z");
+eq("what's left never goes below 0", [allowance(12, 250).left, allowance(300, 250).left], [238, 0]);
+eq("the used-up message", allowanceUsedMessage(allowance(250, 250, new Date("2026-11-27T12:00:00Z"))), "You've used all 250 AI checks and worksheets for this month. They start over on December 1.");
 eq("quotes pasted around values are dropped", [envValue("A", { A: ' "abc" ' }), envValue("A", { A: "abc\"" }), envValue("A", { A: "''" }), envValue("A", {})], ["abc", "abc", undefined, undefined]);
 eq(
   "a stray quote on REDIS_URL is dropped",

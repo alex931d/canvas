@@ -221,7 +221,7 @@ const QUESTIONS = [
   },
   {
     q: "What does the membership add?",
-    a: "Your drawings kept in your account, on every device you sign in on; step-by-step math checks; the geometry, trig and proof tools; worksheets with answer keys; the chemistry tools; flashcards; drawing live with others; team workspaces; and study buddies that keep your streak.",
+    a: "Your drawings kept in your account, on every device you sign in on; step-by-step math checks; the geometry, trig and proof tools; worksheets with answer keys (math checks, proof checks and AI worksheets share 250 AI uses a month); the chemistry tools; flashcards; drawing live with others; team workspaces; and study buddies that keep your streak.",
   },
   {
     q: "What happens to my drawings when I join?",

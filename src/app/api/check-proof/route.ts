@@ -3,6 +3,7 @@ import { MathCheckError } from "@/lib/ai/check-math";
 import { checkProof } from "@/lib/ai/check-proof";
 import { limiters } from "@/lib/auth/rate-limit";
 import { getCurrentSession } from "@/lib/auth/session";
+import { withAiAllowance } from "@/lib/billing/ai-quota";
 import { membershipRequiredResponse } from "@/lib/billing/membership";
 
 /**
@@ -36,11 +37,13 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return Response.json({ error: parsed.error.issues[0]?.message ?? "Invalid body" }, { status: 400 });
   }
-  try {
-    return Response.json(await checkProof(parsed.data));
-  } catch (err) {
-    if (err instanceof MathCheckError) return Response.json({ error: err.message }, { status: err.status });
-    console.error("[check-proof]", err);
-    return Response.json({ error: "Checking failed unexpectedly." }, { status: 500 });
-  }
+  return withAiAllowance(user.id, async () => {
+    try {
+      return Response.json(await checkProof(parsed.data));
+    } catch (err) {
+      if (err instanceof MathCheckError) return Response.json({ error: err.message }, { status: err.status });
+      console.error("[check-proof]", err);
+      return Response.json({ error: "Checking failed unexpectedly." }, { status: 500 });
+    }
+  });
 }
