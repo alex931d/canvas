@@ -525,6 +525,8 @@ export function CanvasEditor({
 
   // Undo / redo / save shortcuts (tool and selection keys live in the board).
   const onKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    // Autofill and some extensions send key events with no key name.
+    if (typeof e.key !== "string") return;
     const mod = e.metaKey || e.ctrlKey;
     const key = e.key.toLowerCase();
     if (mod && key === "s") {

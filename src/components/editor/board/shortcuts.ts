@@ -32,6 +32,8 @@ const NUDGE: Record<string, [number, number]> = {
  */
 export class Shortcuts {
   static commandFor(e: Keys, readOnly: boolean): BoardCommand | null {
+    // Autofill and some extensions send key events with no key name.
+    if (typeof e.key !== "string") return null;
     const key = e.key.toLowerCase();
     if (e.metaKey || e.ctrlKey) {
       switch (key) {
