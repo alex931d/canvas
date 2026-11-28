@@ -74,6 +74,7 @@ import { typesetMath } from "@/lib/math/layout";
 import { DEFAULT_PREFERENCES, type Preferences } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
 import { Board, type BoardHandle, type FlashcardCapture } from "./board";
+import { noteAiCallsLeft } from "./ai-allowance";
 import { ChemPanel } from "./chem-panel";
 import { MathPanel, type MathTab } from "./math-tools/math-panel";
 import type { Place } from "./math-tools/shared";
@@ -675,8 +676,8 @@ export function CanvasEditor({
       const panel = document.querySelector("[data-ui=side-panel]")?.getBoundingClientRect();
       const boardBox = document.querySelector("[data-testid=board]")?.getBoundingClientRect();
       const covered = panel && boardBox ? Math.max(0, boardBox.right - panel.left) : 0;
-      const ids = boardRef.current?.insertFigure(parts, covered) ?? [];
-      if (ids.length) toast.success("Added to the canvas.", { id: "figure-insert", duration: 2000 });
+      // It lands selected in view, which says enough (a toast would cover the panel's buttons).
+      boardRef.current?.insertFigure(parts, covered);
     } catch {
       toast.error("Couldn't load the equation tools. Check your connection and try again.");
     }
@@ -857,6 +858,7 @@ export function CanvasEditor({
     }
     const json = await res.json().catch(() => null);
     if (!res.ok) throw new Error(json?.error ?? `Checking failed (${res.status}).`);
+    noteAiCallsLeft(res);
     return mathCheckSchema.parse(json);
   }
 

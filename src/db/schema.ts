@@ -162,6 +162,23 @@ export const storageDeletions = pgTable("storage_deletions", {
   remindedAt: timestamp("reminded_at", { withTimezone: true }),
 }).enableRLS();
 
+/**
+ * AI calls (math checks, proof checks, worksheets) per member per calendar
+ * month (UTC), for the monthly allowance (src/lib/billing/ai-quota.ts).
+ */
+export const aiUsage = pgTable(
+  "ai_usage",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** The first of the month, "2026-11-01". */
+    month: text("month").notNull(),
+    calls: integer("calls").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.month] })],
+).enableRLS();
+
 export const sessions = pgTable(
   "sessions",
   {

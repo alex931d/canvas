@@ -2,6 +2,7 @@
 
 import { SidePanel, Tab, TabList, Tabs } from "@/components/kit";
 import type { CanvasElement } from "@/lib/canvas/schema";
+import { useAiAllowance } from "../ai-allowance";
 import { ProofTool } from "./proof-tool";
 import type { Place } from "./shared";
 import { TriangleTool } from "./triangle-tool";
@@ -37,6 +38,7 @@ export function MathPanel({
   getSelection: () => string[];
   title: string;
 }) {
+  const ai = useAiAllowance(open);
   return (
     <SidePanel
       open={open}
@@ -68,6 +70,11 @@ export function MathPanel({
         <Kept value="worksheet" tab={tab}>
           <WorksheetTool place={place} canInsert={canInsert} elements={elements} getSelection={getSelection} title={title} />
         </Kept>
+        {ai ? (
+          <p className="text-xs text-muted-foreground" data-testid="ai-left">
+            {ai.left} of {ai.limit} AI checks and worksheets left this month. Triangles, trig and printing don’t use any.
+          </p>
+        ) : null}
       </Tabs>
     </SidePanel>
   );

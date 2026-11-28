@@ -1,3 +1,5 @@
+import { DEFAULT_AI_MONTHLY_CALLS } from "./ai-allowance";
+
 /**
  * The two ways to use canvas, and what each one includes. Safe to import
  * anywhere: the landing and pricing pages list these, and the editor asks
@@ -94,7 +96,7 @@ export const FREE_INCLUDES = [
 /** What the membership adds on top of the free plan. */
 export const MEMBERSHIP_INCLUDES = [
   "Drawings kept in your account, on every device",
-  "Step-by-step math checks",
+  `Step-by-step math checks, proof checks and AI worksheets: ${DEFAULT_AI_MONTHLY_CALLS} a month`,
   "Geometry, trig and proof tools, and worksheets with answer keys",
   "Chemistry tools and flashcards",
   "Drawing live with others, and team workspaces",

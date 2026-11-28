@@ -6,6 +6,7 @@ import { Badge, Button, Label } from "@/components/kit";
 import { proofFigure } from "@/lib/math/figures";
 import { lintProof, PROOF_REASONS, type Proof, type ProofVerdict } from "@/lib/math/proof";
 import { cn } from "@/lib/utils";
+import { noteAiCallsLeft } from "../ai-allowance";
 import { AddButton, ErrorLine, Examples, type Place } from "./shared";
 
 const SYMBOLS = ["≅", "∠", "△", "∥", "⊥", "°", "≠", "≤", "≥", "√", "π", "∴"];
@@ -99,6 +100,7 @@ export function ProofTool({ place, canInsert }: { place: Place; canInsert: boole
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error ?? `Checking failed (${res.status}).`);
+      noteAiCallsLeft(res);
       setCheck({ status: "done", verdict: body as ProofVerdict, for: key });
     } catch (err) {
       setCheck({ status: "error", error: err instanceof Error && err.message !== "Failed to fetch" ? err.message : "The server is unreachable. Try again when you're back online." });

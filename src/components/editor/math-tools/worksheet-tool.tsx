@@ -15,6 +15,7 @@ import {
   type WorksheetRequest,
 } from "@/lib/math/worksheet";
 import { Tex } from "../tex";
+import { noteAiCallsLeft } from "../ai-allowance";
 import { printWorksheet } from "./print-worksheet";
 import { AddButton, ErrorLine, type Place } from "./shared";
 
@@ -36,6 +37,7 @@ async function ask(req: WorksheetRequest): Promise<Worksheet> {
   }
   const body = await res.json().catch(() => null);
   if (!res.ok) throw new Error(body?.error ?? `The worksheet couldn't be made (${res.status}).`);
+  noteAiCallsLeft(res);
   return body as Worksheet;
 }
 

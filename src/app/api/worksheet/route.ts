@@ -3,6 +3,7 @@ import { AiError } from "@/lib/ai/chat";
 import { makeWorksheet } from "@/lib/ai/worksheet";
 import { limiters } from "@/lib/auth/rate-limit";
 import { getCurrentSession } from "@/lib/auth/session";
+import { withAiAllowance } from "@/lib/billing/ai-quota";
 import { membershipRequiredResponse } from "@/lib/billing/membership";
 import { MAX_PROBLEMS, MAX_SOURCE } from "@/lib/math/worksheet";
 
@@ -37,11 +38,13 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return Response.json({ error: parsed.error.issues[0]?.message ?? "Invalid body" }, { status: 400 });
   }
-  try {
-    return Response.json(await makeWorksheet(parsed.data));
-  } catch (err) {
-    if (err instanceof AiError) return Response.json({ error: err.message }, { status: err.status });
-    console.error("[worksheet]", err);
-    return Response.json({ error: "The worksheet couldn't be made." }, { status: 500 });
-  }
+  return withAiAllowance(user.id, async () => {
+    try {
+      return Response.json(await makeWorksheet(parsed.data));
+    } catch (err) {
+      if (err instanceof AiError) return Response.json({ error: err.message }, { status: err.status });
+      console.error("[worksheet]", err);
+      return Response.json({ error: "The worksheet couldn't be made." }, { status: 500 });
+    }
+  });
 }
