@@ -4,6 +4,7 @@ import { Egg, Ghost, Snowflake } from "lucide-react";
 import { THEME_INFO, type Theme } from "@/lib/seasons";
 import { cn } from "@/lib/utils";
 import { Bat, CandyCane, CandyCanePair, EasterEgg, EggNest, JackOLantern, Spider } from "./art";
+import { useLanternLit, useLightsOut, useLightsOutSchedule } from "./lights";
 import { Particles } from "./particles";
 import { setDecorationsHidden, useReducedMotion, useSeason, useSeasonState } from "./season-context";
 
@@ -56,6 +57,7 @@ export function SeasonalEffects() {
           {theme === "halloween" ? <Bats /> : null}
         </div>
       ) : null}
+      {theme === "halloween" && !hidden && !reduced ? <LightsOut /> : null}
       <button
         type="button"
         onClick={() => setDecorationsHidden(!hidden)}
@@ -79,7 +81,7 @@ export function SeasonalHeaderDecor() {
   return (
     <span aria-hidden data-season-decor={theme} className="flex items-center">
       {theme === "christmas" ? <CandyCanePair className="h-9 w-auto" /> : null}
-      {theme === "halloween" ? <JackOLantern className="h-7 w-auto" /> : null}
+      {theme === "halloween" ? <Lantern className="relative h-7 w-auto" /> : null}
       {theme === "easter" ? (
         <>
           <EasterEgg id="hdr-a" base="#f6b8c8" band="#e0789a" className="h-7 w-auto -rotate-12" />
@@ -110,8 +112,8 @@ export function SeasonalBoardDecor() {
             <span className="h-16 w-px bg-grey-500/70" />
             <Spider className="h-8 w-auto" />
           </div>
-          <JackOLantern className="absolute bottom-5 left-5 hidden h-16 w-auto lg:block" />
-          <JackOLantern className="absolute bottom-5 left-[100px] hidden h-11 w-auto lg:block" />
+          <Lantern className="absolute bottom-5 left-5 hidden h-16 w-auto lg:block" />
+          <Lantern className="absolute bottom-5 left-[100px] hidden h-11 w-auto lg:block" />
         </>
       ) : null}
       {theme === "easter" ? (
@@ -120,6 +122,54 @@ export function SeasonalBoardDecor() {
           <EasterEgg id="board-top" base="#d3c0f0" band="#9a7fd0" className="absolute top-6 right-[9%] h-12 w-auto rotate-[18deg]" />
         </>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * A jack-o'-lantern whose light sputters out now and then. While the page is
+ * dark it blazes, above the darkness (it needs a position: `relative` or
+ * `absolute` in its className).
+ */
+export function Lantern({ className }: { className?: string }) {
+  const reduced = useReducedMotion();
+  const { lit, blaze } = useLanternLit(reduced);
+  return <JackOLantern lit={lit} blaze={blaze} className={className} style={blaze ? { zIndex: 36 } : undefined} />;
+}
+
+/** Glowing eyes that open in the dark, here and there. */
+const EYES = [
+  { left: "9%", top: "28%", delay: "0.8s" },
+  { left: "86%", top: "46%", delay: "2.1s" },
+  { left: "38%", top: "78%", delay: "3.4s" },
+  { left: "64%", top: "18%", delay: "1.5s" },
+];
+
+/**
+ * Now and then the lights go out: the page fades to dark for a few seconds,
+ * every jack-o'-lantern blazes, and eyes blink in the dark. Never takes a
+ * click, and the "Hide decorations" button stays above it.
+ */
+function LightsOut() {
+  useLightsOutSchedule(true);
+  const dark = useLightsOut();
+  return (
+    <div
+      aria-hidden
+      data-lights-out-overlay={dark ? "dark" : "light"}
+      className={cn(
+        "pointer-events-none fixed inset-0 z-[35] bg-[radial-gradient(ellipse_at_50%_30%,rgba(28,18,44,0.86),rgba(8,5,14,0.94))] transition-opacity",
+        dark ? "opacity-100 duration-[1400ms]" : "opacity-0 duration-[900ms]",
+      )}
+    >
+      {dark
+        ? EYES.map((e, i) => (
+            <span key={i} className="season-eyes absolute flex gap-2" style={{ left: e.left, top: e.top, animationDelay: e.delay }}>
+              <span className="h-2.5 w-4 rounded-[50%] bg-[#c6f25c] shadow-[0_0_10px_#c6f25c]" />
+              <span className="h-2.5 w-4 rounded-[50%] bg-[#c6f25c] shadow-[0_0_10px_#c6f25c]" />
+            </span>
+          ))
+        : null}
     </div>
   );
 }

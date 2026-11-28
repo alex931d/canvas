@@ -1,3 +1,5 @@
+import { useId } from "react";
+
 /** Seasonal artwork as plain SVG. Decorative only: every piece is aria-hidden. */
 
 type ArtProps = { className?: string; style?: React.CSSProperties };
@@ -44,16 +46,36 @@ function CaneShape({ x }: { x: number }) {
   );
 }
 
-/** A carved pumpkin with a warm glow in the face. */
-export function JackOLantern({ className, style }: ArtProps) {
+/**
+ * A carved pumpkin. Lit, its face glows; out, the carving shows dark. With
+ * `blaze` (the page is dark) the glow spreads past the pumpkin.
+ */
+export function JackOLantern({ className, style, lit = true, blaze = false }: ArtProps & { lit?: boolean; blaze?: boolean }) {
+  const face = lit ? "#ffd45c" : "#4a2a14";
+  const glow = `lantern-glow-${useId().replace(/:/g, "")}`;
   return (
-    <svg aria-hidden viewBox="0 0 72 62" className={className} style={style}>
+    // The glow may spill past the pumpkin's box.
+    <svg aria-hidden viewBox="0 0 72 62" overflow="visible" className={className} style={style} data-lit={lit} data-lantern="">
+      <defs>
+        <radialGradient id={glow}>
+          <stop offset="0.35" stopColor="#ffb43c" />
+          <stop offset="1" stopColor="#ffb43c" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+      <circle
+        cx="36"
+        cy="38"
+        r={blaze ? 54 : 38}
+        fill={`url(#${glow})`}
+        className="season-lantern-glow"
+        style={{ opacity: lit ? (blaze ? 0.75 : 0.3) : 0 }}
+      />
       <path d="M36 10 C37 4 40 2 44 1" stroke="#4d6b2e" strokeWidth="4" strokeLinecap="round" fill="none" />
       <ellipse cx="22" cy="36" rx="17" ry="22" fill="#d9661f" />
       <ellipse cx="50" cy="36" rx="17" ry="22" fill="#d9661f" />
       <ellipse cx="36" cy="36" rx="17" ry="24" fill="#ef8433" />
-      <path d="M24 30 L30 22 L33 31 Z M48 30 L42 22 L39 31 Z" fill="#ffd45c" />
-      <path d="M20 40 Q36 54 52 40 L47 43 L44 39 L40 44 L36 40 L32 44 L28 39 L25 43 Z" fill="#ffd45c" />
+      <path d="M24 30 L30 22 L33 31 Z M48 30 L42 22 L39 31 Z" fill={face} />
+      <path d="M20 40 Q36 54 52 40 L47 43 L44 39 L40 44 L36 40 L32 44 L28 39 L25 43 Z" fill={face} />
     </svg>
   );
 }

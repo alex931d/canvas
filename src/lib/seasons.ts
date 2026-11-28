@@ -14,9 +14,9 @@ export type ThemeMode = "auto" | "off" | Theme;
 export const THEME_MODES: readonly ThemeMode[] = ["auto", ...THEMES, "off"];
 
 export const THEME_INFO: Record<Theme, { label: string; decorations: string; when: string }> = {
-  easter: { label: "Easter", decorations: "painted eggs and drifting spring petals", when: "Palm Sunday to Easter Monday" },
-  halloween: { label: "Halloween", decorations: "bats, a spider and jack-o'-lanterns", when: "October 15–31" },
-  christmas: { label: "Christmas", decorations: "falling snow and candy canes", when: "December 1–26" },
+  easter: { label: "Easter", decorations: "painted eggs, drifting petals and a meadow with a hopping bunny", when: "Palm Sunday to Easter Monday" },
+  halloween: { label: "Halloween", decorations: "bats, a spider, flickering jack-o'-lanterns and the odd lights-out", when: "October 15–31" },
+  christmas: { label: "Christmas", decorations: "falling snow, candy canes and a candy town with waving elves", when: "December 1–26" },
 };
 
 export function isThemeMode(value: unknown): value is ThemeMode {

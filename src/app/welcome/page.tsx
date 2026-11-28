@@ -8,6 +8,7 @@ import { Button, Kbd } from "@/components/kit";
 import { FREE_INCLUDES, MEMBERSHIP, MEMBERSHIP_INCLUDES } from "@/lib/billing/plan";
 import { Reveal } from "@/components/motion/reveal";
 import { cn } from "@/lib/utils";
+import { SeasonalScene } from "@/components/seasonal/scenes";
 import { SeasonalBoardDecor, SeasonalEffects } from "@/components/seasonal/site-decor";
 import {
   DOT_GRID,
@@ -226,6 +227,9 @@ export default function WelcomePage() {
             </div>
           </div>
         </section>
+
+        {/* At Easter, Halloween and Christmas: a strip of seasonal scenery. */}
+        <SeasonalScene />
 
         {/* ------------------------------------------------------------ tools */}
         <section aria-labelledby="tools-title" className={cn(OUTER, "py-20 sm:py-28")}>

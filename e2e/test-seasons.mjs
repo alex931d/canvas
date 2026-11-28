@@ -23,6 +23,7 @@ const browser = await puppeteer.launch({
   defaultViewport: { width: 1440, height: 900 },
 });
 const errors = [];
+const SCENES = { christmas: "a candy town", halloween: "a pumpkin patch", easter: "a spring meadow" };
 
 /** A fresh browser whose clock reads `date` (local time), if given. */
 async function visitor(date) {
@@ -56,6 +57,7 @@ async function decor(page) {
     snow: Number(document.querySelector("[data-season-effects] canvas[data-particles-kind=snow]")?.dataset.particles ?? 0),
     petals: Number(document.querySelector("[data-season-effects] canvas[data-particles-kind=petals]")?.dataset.particles ?? 0),
     bats: document.querySelectorAll("[data-season-effects] .season-bat").length,
+    scene: document.querySelector("[data-season-scene]")?.dataset.seasonScene ?? null,
     toggle: [...document.querySelectorAll("button")].find((b) => /decorations$/.test(b.textContent))?.textContent ?? null,
   }));
 }
@@ -96,8 +98,106 @@ try {
     if (want === "christmas") check("Christmas snows on the landing page", d.snow > 20, `${d.snow} flakes`);
     if (want === "halloween") check("Halloween has bats flying", d.bats === 3);
     if (want === "easter") check("Easter has spring petals", d.petals > 5, `${d.petals} petals`);
+    check(`the landing page's scenery: ${want ? SCENES[want] : "none"}`, d.scene === want, String(d.scene));
     await page.browserContext().close();
   }
+
+  // ================================================================= the scenes
+  // Christmas: a candy town whose elves take turns waving, under twinkling lights.
+  const xmas = await visitor("2026-12-10T12:00");
+  await xmas.goto(BASE, { waitUntil: "networkidle0" });
+  await xmas.waitForSelector("[data-scene=candy-town]");
+  const town = await xmas.evaluate(() => ({
+    elves: document.querySelectorAll("[data-scene=candy-town] [data-elf]").length,
+    bulbs: document.querySelectorAll("[data-scene=candy-town] .season-twinkle").length,
+    waving: [...document.querySelectorAll(".season-elf-arm")].every((a) => getComputedStyle(a).animationName === "season-elf-wave"),
+  }));
+  check("Christmas: a candy town with five elves under string lights", town.elves === 5 && town.bulbs >= 24, JSON.stringify(town));
+  const arms = async () => xmas.$$eval(".season-elf-arm", (as) => as.map((a) => getComputedStyle(a).transform));
+  const poses = [await arms()];
+  for (let i = 0; i < 8; i++) {
+    await sleep(250);
+    poses.push(await arms());
+  }
+  const moved = poses[0].map((_, i) => new Set(poses.map((p) => p[i])).size > 1).filter(Boolean).length;
+  check("the elves wave", town.waving && moved >= 3, `${moved} of 5 arms moved`);
+  await xmas.browserContext().close();
+
+  // Halloween: lanterns sputter out and catch again, each on its own.
+  const october = await visitor("2026-10-20T12:00");
+  await october.goto(BASE, { waitUntil: "networkidle0" });
+  await october.waitForSelector("[data-scene=pumpkin-patch]");
+  const lanterns = await october.$$eval("[data-scene=pumpkin-patch] [data-lantern]", (l) => l.length);
+  let wentOut = false;
+  for (let i = 0; i < 90 && !wentOut; i++) {
+    await sleep(150);
+    wentOut = await october.$$eval("[data-lantern]", (l) => l.some((x) => x.dataset.lit === "false"));
+  }
+  check("Halloween: a pumpkin patch whose lanterns go out and light again", lanterns === 6 && wentOut, `${lanterns} lanterns`);
+
+  // …and now and then the lights go out.
+  await october.evaluate(() => window.dispatchEvent(new Event("canvas:lights-out")));
+  await october.waitForSelector("[data-lights-out-overlay=dark]", { timeout: 3000 }).catch(() => {});
+  await sleep(1500);
+  const darkPage = await october.evaluate(() => {
+    const overlay = document.querySelector("[data-lights-out-overlay]");
+    const start = [...document.querySelectorAll("a")].find((a) => a.textContent.trim() === "Start drawing");
+    const r = start.getBoundingClientRect();
+    return {
+      dark: document.documentElement.hasAttribute("data-lights-out") && overlay?.dataset.lightsOutOverlay === "dark",
+      opacity: Number(getComputedStyle(overlay).opacity),
+      allLit: [...document.querySelectorAll("[data-lantern]")].every((l) => l.dataset.lit === "true"),
+      sceneOnTop: getComputedStyle(document.querySelector("[data-season-scene]")).zIndex === "36",
+      eyes: document.querySelectorAll(".season-eyes").length,
+      clickable: start.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)),
+    };
+  });
+  check(
+    "the page goes dark, every lantern blazes and eyes open in the dark",
+    darkPage.dark && darkPage.opacity > 0.9 && darkPage.allLit && darkPage.sceneOnTop && darkPage.eyes === 4,
+    JSON.stringify(darkPage),
+  );
+  check("the darkness never takes a click", darkPage.clickable);
+  await october.waitForFunction(() => !document.documentElement.hasAttribute("data-lights-out"), { timeout: 10_000 }).catch(() => {});
+  check("then the lights come back", !(await october.evaluate(() => document.documentElement.hasAttribute("data-lights-out"))));
+  await october.browserContext().close();
+
+  // It happens by itself within the first half minute.
+  const waiting = await visitor("2026-10-20T12:00");
+  await waiting.goto(BASE, { waitUntil: "networkidle0" });
+  const byItself = await waiting
+    .waitForFunction(() => document.documentElement.hasAttribute("data-lights-out"), { timeout: 30_000, polling: 250 })
+    .then(() => true)
+    .catch(() => false);
+  check("the lights go out by themselves now and then", byItself);
+  await waiting.browserContext().close();
+
+  // Easter: a meadow with a bunny hopping through.
+  const spring = await visitor("2027-03-25T12:00");
+  await spring.goto(BASE, { waitUntil: "networkidle0" });
+  await spring.waitForSelector("[data-scene=spring-meadow]");
+  const meadow = await spring.evaluate(() => ({
+    bunny: getComputedStyle(document.querySelector(".season-run")).animationName,
+    tulips: document.querySelectorAll("[data-scene=spring-meadow] .season-sway").length,
+  }));
+  check("Easter: a meadow of tulips with a bunny hopping across", meadow.bunny === "season-run" && meadow.tulips >= 10, JSON.stringify(meadow));
+  await spring.browserContext().close();
+
+  // Reduced motion: the scenery stays, but nothing waves, sputters or goes dark.
+  const calmOctober = await visitor("2026-10-20T12:00");
+  await calmOctober.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]);
+  await calmOctober.goto(BASE, { waitUntil: "networkidle0" });
+  await calmOctober.waitForSelector("[data-scene=pumpkin-patch]");
+  let calmOut = false;
+  for (let i = 0; i < 40 && !calmOut; i++) {
+    await sleep(200);
+    calmOut = await calmOctober.$$eval("[data-lantern]", (l) => l.some((x) => x.dataset.lit === "false"));
+  }
+  await calmOctober.evaluate(() => window.dispatchEvent(new Event("canvas:lights-out")));
+  await sleep(800);
+  const calmDark = await calmOctober.evaluate(() => document.documentElement.hasAttribute("data-lights-out") || !!document.querySelector("[data-lights-out-overlay]"));
+  check("with reduced motion the lanterns stay lit and the lights stay on", !calmOut && !calmDark);
+  await calmOctober.browserContext().close();
   const head = await fetch(BASE);
   check(
     "the landing page is still prerendered (the theme is worked out in the browser)",
@@ -136,7 +236,7 @@ try {
   const afterReload = await decor(july);
   check(
     "Hide Christmas decorations removes them, and it's remembered",
-    hidden.decor.length === 0 && hidden.effects === null && afterReload.decor.length === 0 && afterReload.toggle === "Show Christmas decorations",
+    hidden.decor.length === 0 && hidden.effects === null && hidden.scene === null && afterReload.decor.length === 0 && afterReload.scene === null && afterReload.toggle === "Show Christmas decorations",
     JSON.stringify(afterReload),
   );
   await july.click("xpath/.//button[normalize-space()='Show Christmas decorations']");
