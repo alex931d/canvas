@@ -1028,6 +1028,7 @@ eq(
     ({ key, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...mods }) as KeyboardEvent;
   eq("P picks the pen", Shortcuts.commandFor(keys("p"), false), { kind: "tool", tool: "pen" });
   eq("but not when viewing only", Shortcuts.commandFor(keys("p"), true), null);
+  eq("a key event with no key name (autofill) does nothing", Shortcuts.commandFor({ ...keys("p"), key: undefined as unknown as string }, false), null);
   eq("viewers can still lasso", Shortcuts.commandFor(keys("s"), true), { kind: "tool", tool: "lasso" });
   eq("I adds a picture", Shortcuts.commandFor(keys("i"), false), { kind: "action", action: "media" });
   eq("⌘D duplicates", Shortcuts.commandFor(keys("d", { metaKey: true }), false), { kind: "duplicate" });

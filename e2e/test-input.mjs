@@ -72,6 +72,15 @@ const before = Number(sql(`select jsonb_array_length(data->'elements') from draw
 await sleep(1500);
 check("pinching doesn't draw", Number(sql(`select jsonb_array_length(data->'elements') from drawings where id='${v1Id}'`)) === before);
 
+// Chrome's autofill sends a plain "keydown" Event with no key name.
+const errorsBefore = errors.length;
+await page.evaluate(() => {
+  window.dispatchEvent(new Event("keydown"));
+  document.querySelector("[data-testid=board]")?.dispatchEvent(new Event("keydown", { bubbles: true }));
+});
+await sleep(300);
+check("a key event with no key name (autofill) is ignored", errors.length === errorsBefore, errors.slice(errorsBefore).join(" | "));
+
 console.log("\nerrors:", errors.length ? errors : "none");
 sql(`delete from drawings where id='${v1Id}'`);
 await browser.close();
